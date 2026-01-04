@@ -5,6 +5,21 @@
 
 > *"Traditional VCS implementations were designed in a single-core era. Gato is an experimental engine built in Rust to challenge the status quo by leveraging massive parallelism and modern compression."*
 
+### 🛠️ Quick Start
+
+**Gato** commands mirror Git but include short aliases for speed.
+
+| Command | Alias | Description |
+| --- | --- | --- |
+| `gato init` | `i` | Initialize a repository |
+| `gato add <paths>` | `a` | Add files (e.g., `gato a .`) |
+| `gato commit <msg> <author>` | `c` | Commit changes |
+| `gato new-branch <name>` | `nb` | Create a new branch |
+| `gato change-branch <name>` | `cb` | Switch to a branch |
+| `gato checkout <index>` | `co` | Checkout a commit (0 = latest) |
+
+> *Note: `status` and `log` commands are currently under development.*
+
 ---
 
 ## ⚡ Performance Benchmarks

@@ -68,6 +68,7 @@ Gato is not just a clone; it is a re-imagining of internal plumbing:
 * **Hybrid I/O Strategy:** Implements smart memory mapping (`mmap`) for large blobs while using buffered reads for small files to minimize syscall overhead.
 * **Modern Cryptography:** Uses **BLAKE3** for hashing (much faster than Git's SHA-1) while maintaining cryptographic security.
 * **Compression:** Uses **Zstd** (Zstandard) which offers superior compression ratios and decompression speeds compared to Deflate.
+* **Content-Defined Chunking:** Utilizes **FastCDC** to intelligently split large binary files into deduplicated chunks, optimizing storage efficiency for heavy assets.
 
 ## ⚠️ Disclaimer
 This is an **educational research project** built to understand the internals of version control systems. While it outperforms Git in specific raw-throughput scenarios, it is not feature-complete (lacks networking, merging strategies, etc.) and is not intended for production use yet.

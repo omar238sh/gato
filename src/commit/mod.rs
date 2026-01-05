@@ -5,10 +5,14 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use bincode::{Decode, Encode, config, encode_to_vec};
+use bincode::{
+    Decode, Encode,
+    config::{self, Configuration},
+    decode_from_slice, encode_to_vec,
+};
 use blake3::hash;
 
-use crate::add::{get_branch_head, index::Index};
+use crate::add::{chunker::IndexData, get_branch_head, index::Index};
 
 #[derive(Encode, Decode, Debug, Clone)]
 pub struct Commit {
@@ -147,7 +151,7 @@ impl TreeEntry {
     fn write(&self, parent_path: &Path) {
         match self {
             TreeEntry::Blob(name, hash) => {
-                let hash_hex = String::from_utf8(hash.clone()).expect("Invalid UTF-8 in hash");
+                let hash_hex = hex::encode(hash);
                 let compressed_file_path = PathBuf::new().join(format!(
                     ".gato/objects/{}/{}",
                     &hash_hex[..2],
@@ -158,9 +162,15 @@ impl TreeEntry {
                 let blob = crate::add::smart_read(&compressed_file_path);
                 match blob {
                     Ok(v) => {
-                        let decompressed_data = crate::add::decompress(&v).unwrap();
-                        write(&path, decompressed_data)
-                            .expect(&format!("cannot write file: {name}"));
+                        if let Ok((chunk, _)) =
+                            decode_from_slice::<IndexData, Configuration>(&v, config::standard())
+                        {
+                            chunk.restore_file(&path).expect("cannot restore file");
+                        } else {
+                            let decompressed_data = crate::add::decompress(&v).unwrap();
+                            write(&path, decompressed_data)
+                                .expect(&format!("cannot write file: {name}"));
+                        }
                     }
                     Err(_) => {
                         panic!("cannot read file: {}", name)

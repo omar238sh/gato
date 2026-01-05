@@ -10,10 +10,11 @@ use std::ops::Deref;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
+use crate::add::chunker::add_as_chunk;
 use crate::add::index::{Index, IndexEntry};
 use crate::config::load::load_config;
+pub mod chunker;
 pub mod index;
-
 pub enum FileContent {
     Mmapped(Mmap),
     Loaded(Vec<u8>),
@@ -66,14 +67,14 @@ pub fn smart_read(path: &Path) -> io::Result<FileContent> {
     }
 }
 
-pub fn compress_zlib(data: &FileContent) -> io::Result<Vec<u8>> {
+pub fn compress_zlib(data: &[u8]) -> io::Result<Vec<u8>> {
     let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), Compression::fast());
     encoder.write_all(&*data)?;
     let compressed = encoder.finish()?;
     Ok(compressed)
 }
 
-fn compress_zstd(data: &FileContent, level: i32) -> io::Result<Vec<u8>> {
+fn compress_zstd(data: &[u8], level: i32) -> io::Result<Vec<u8>> {
     let mut encoder = zstd::stream::write::Encoder::new(Vec::new(), level)
         .expect("Failed to create zstd encoder");
     encoder
@@ -83,14 +84,14 @@ fn compress_zstd(data: &FileContent, level: i32) -> io::Result<Vec<u8>> {
     Ok(compressed_data)
 }
 
-pub fn decompress_zlib(data: &FileContent) -> io::Result<Vec<u8>> {
+pub fn decompress_zlib(data: &[u8]) -> io::Result<Vec<u8>> {
     let mut decoder = flate2::read::ZlibDecoder::new(&data[..]);
     let mut decompressed_data = Vec::new();
     decoder.read_to_end(&mut decompressed_data)?;
     Ok(decompressed_data)
 }
 
-pub fn decompress_zstd(data: &FileContent) -> io::Result<Vec<u8>> {
+pub fn decompress_zstd(data: &[u8]) -> io::Result<Vec<u8>> {
     let mut decoder =
         zstd::stream::read::Decoder::new(&data[..]).expect("Failed to create zstd decoder");
     let mut decompressed_data = Vec::new();
@@ -100,7 +101,7 @@ pub fn decompress_zstd(data: &FileContent) -> io::Result<Vec<u8>> {
     Ok(decompressed_data)
 }
 
-pub fn compress(data: &FileContent) -> io::Result<Vec<u8>> {
+pub fn compress(data: &[u8]) -> io::Result<Vec<u8>> {
     let config = load_config();
     match config.compression {
         Some(v) => match v.method {
@@ -117,7 +118,7 @@ pub fn compress(data: &FileContent) -> io::Result<Vec<u8>> {
     }
 }
 
-pub fn decompress(data: &FileContent) -> io::Result<Vec<u8>> {
+pub fn decompress(data: &[u8]) -> io::Result<Vec<u8>> {
     let config = load_config();
 
     match config.compression {
@@ -129,7 +130,7 @@ pub fn decompress(data: &FileContent) -> io::Result<Vec<u8>> {
     }
 }
 
-pub fn write_blob(compressed_data: Vec<u8>, outpath: &Path) -> io::Result<()> {
+pub fn write_blob(compressed_data: &Vec<u8>, outpath: &Path) -> io::Result<()> {
     if let Some(parent) = outpath.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -179,7 +180,7 @@ pub fn add_file(file_path: &Path) -> io::Result<IndexEntry> {
         .join("objects")
         .join(&hash_str[..2])
         .join(&hash_str[2..]);
-    write_blob(compressed_data, out_path.as_path())?;
+    write_blob(&compressed_data, out_path.as_path())?;
 
     let metadata = get_file_metadata(file_path)?;
     let index_entry = index::IndexEntry {
@@ -197,8 +198,14 @@ pub fn add_all(paths: Vec<PathBuf>) -> io::Result<()> {
     let new_entries: Vec<io::Result<(PathBuf, IndexEntry)>> = paths
         .par_iter()
         .map(|path| {
-            let entry = add_file(&path)?;
-            Ok((path.clone(), entry))
+            let file_len = get_file_metadata(path)?.len();
+            if file_len < 1024 * 1024 * 8 {
+                let entry = add_file(&path)?;
+                Ok((path.clone(), entry))
+            } else {
+                dbg!("big file devide to chunks");
+                add_as_chunk(path)
+            }
         })
         .collect();
     for result in new_entries {

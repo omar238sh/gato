@@ -10,38 +10,73 @@ use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use serde::{Deserialize, Serialize};
 
 use crate::add::{
-    FileContent, compress, get_file_metadata, index::IndexEntry, smart_read, write_blob,
+    FileContent, compress, compute_hash, get_file_metadata, index::IndexEntry, smart_read,
+    write_blob,
 };
 
-pub fn cut_compress(data: &FileContent) -> Vec<Vec<u8>> {
-    let mut compressed_chuncks = Vec::new();
+pub fn cut(data: &FileContent) -> Vec<&[u8]> {
     let min_size = 1024 * 1024; // 1 MB
     let max_size = 8 * 1024 * 1024; // 8 MB
     let avg_size = 4 * 1024 * 1024; // 2 MB
 
     let chunker = fastcdc::v2020::FastCDC::new(data, min_size, avg_size, max_size);
-    for chunk in chunker {
-        let chunk_data = &data[chunk.offset as usize..(chunk.offset + chunk.length) as usize];
-        let compressed_data = compress(chunk_data).expect("Compression failed");
-        compressed_chuncks.push(compressed_data);
-    }
-    compressed_chuncks
+    chunker
+        .map(|chunk| &data[chunk.offset as usize..(chunk.offset + chunk.length) as usize])
+        .collect()
 }
 
-// return BTreeMap of Hash -> Chunk Data
-pub fn hash(chunks: Vec<Vec<u8>>) -> ChunkerResult {
+pub fn process_chunk(chunks: Vec<&[u8]>) -> ChunkerResult {
     let mut data = BTreeMap::new();
-    let mut ordered = Vec::new();
-    for chunk in chunks {
-        let hash = blake3::hash(&chunk);
-        data.insert(hash.as_bytes().to_vec(), chunk);
-        ordered.push(hash.as_bytes().to_vec());
+
+    let mut ordered_hash = Vec::new();
+    let a: Vec<(Vec<u8>, Option<Vec<u8>>)> = chunks
+        .par_iter()
+        .map(|chunk| {
+            let hash = compute_hash(chunk)
+                .expect("failed to compute hash")
+                .as_bytes()
+                .to_vec();
+            let out_path = PathBuf::from(".gato")
+                .join("objects")
+                .join(hex::encode(&hash)[..2].to_string())
+                .join(hex::encode(&hash)[2..].to_string());
+
+            if !out_path.exists() {
+                let compressed_data = compress(chunk).expect("failed to compress chunk");
+                (hash, Some(compressed_data))
+            } else {
+                (hash, None)
+            }
+        })
+        .collect();
+
+    for (hash, compressed_opt) in a {
+        ordered_hash.push(hash.clone());
+
+        if let Some(compressed) = compressed_opt {
+            data.insert(hash, compressed);
+        }
     }
+
     ChunkerResult {
         chunks: data,
-        ordered_hashes: ordered,
+        ordered_hashes: ordered_hash,
     }
 }
+// return BTreeMap of Hash -> Chunk Data
+// pub fn hash(chunks: Vec<Vec<u8>>) -> ChunkerResult {
+//     let mut data = BTreeMap::new();
+//     let mut ordered = Vec::new();
+//     for chunk in chunks {
+//         let hash = blake3::hash(&chunk);
+//         data.insert(hash.as_bytes().to_vec(), chunk);
+//         ordered.push(hash.as_bytes().to_vec());
+//     }
+//     ChunkerResult {
+//         chunks: data,
+//         ordered_hashes: ordered,
+//     }
+// }
 #[derive(Debug, Encode, Decode)]
 pub struct IndexData {
     pub path: Vec<Vec<u8>>,
@@ -98,8 +133,8 @@ impl ChunkerResult {
 
 pub fn add_as_chunk(path: &Path) -> io::Result<(PathBuf, IndexEntry)> {
     let buffer = smart_read(path)?;
-    let chunks = cut_compress(&buffer);
-    let chunker_result = hash(chunks);
+
+    let chunker_result = process_chunk(cut(&buffer));
     chunker_result.save_chunks();
     let file_data = chunker_result.index_data();
     let file_hash = blake3::hash(&file_data).as_bytes().to_vec();

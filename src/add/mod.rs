@@ -131,12 +131,17 @@ pub fn decompress(data: &[u8]) -> io::Result<Vec<u8>> {
 }
 
 pub fn write_blob(compressed_data: &Vec<u8>, outpath: &Path) -> io::Result<()> {
-    if let Some(parent) = outpath.parent() {
-        std::fs::create_dir_all(parent)?;
+    let exist = outpath.exists();
+    if exist {
+        Ok(())
+    } else {
+        if let Some(parent) = outpath.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let mut out_file = std::fs::File::create(outpath)?;
+        out_file.write_all(&compressed_data)?;
+        Ok(())
     }
-    let mut out_file = std::fs::File::create(outpath)?;
-    out_file.write_all(&compressed_data)?;
-    Ok(())
 }
 
 pub fn find_files(dir_path: &Path) -> io::Result<Vec<PathBuf>> {
@@ -165,7 +170,7 @@ pub fn get_file_metadata(path: &Path) -> io::Result<std::fs::Metadata> {
     std::fs::metadata(path)
 }
 
-pub fn compute_hash(data: FileContent) -> io::Result<String> {
+pub fn compute_hash(data: &[u8]) -> io::Result<String> {
     let hash = blake3::hash(&data);
     let hash_str = hash.to_hex().to_string();
     Ok(hash_str)
@@ -173,21 +178,33 @@ pub fn compute_hash(data: FileContent) -> io::Result<String> {
 
 pub fn add_file(file_path: &Path) -> io::Result<IndexEntry> {
     let buffer = smart_read(file_path)?;
-    let compressed_data = compress(&buffer)?;
-    let hash_str = compute_hash(buffer)?;
+    let hash_str = compute_hash(&buffer)?;
+    let exist = {
+        let out_path = PathBuf::from(".gato")
+            .join("objects")
+            .join(&hash_str[..2])
+            .join(&hash_str[2..]);
+        out_path.exists()
+    };
+    if !exist {
+        let compressed_data = compress(&buffer)?;
 
-    let out_path = PathBuf::from(".gato")
-        .join("objects")
-        .join(&hash_str[..2])
-        .join(&hash_str[2..]);
-    write_blob(&compressed_data, out_path.as_path())?;
+        let out_path = PathBuf::from(".gato")
+            .join("objects")
+            .join(&hash_str[..2])
+            .join(&hash_str[2..]);
+        write_blob(&compressed_data, out_path.as_path())?;
+    }
 
     let metadata = get_file_metadata(file_path)?;
     let index_entry = index::IndexEntry {
         hash: hash_str.as_bytes().to_vec(),
         size: metadata.len(),
         mtime: metadata.modified()?.elapsed().unwrap().as_secs() as u32,
+        #[cfg(unix)]
         mode: metadata.permissions().mode(),
+        #[cfg(not(unix))]
+        mode: 0,
     };
 
     Ok(index_entry)

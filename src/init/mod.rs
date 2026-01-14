@@ -4,9 +4,11 @@ use crate::commit::Commit;
 
 pub fn create_file_layout() {
     let root_dir = PathBuf::from(".gato");
-
+    if root_dir.exists() {
+        println!("Gato repository already initialized.");
+        return;
+    }
     fs::create_dir(&root_dir).expect("Failed to create .gato directory");
-
     let folders_paths = ["objects", "refs/heads", "refs/tags"];
     for folder in folders_paths {
         fs::create_dir_all(root_dir.join(folder)).expect("Failed to create folder");
@@ -15,13 +17,15 @@ pub fn create_file_layout() {
     fs::write(root_dir.join("HEAD"), "master").expect("Failed to create HEAD file");
 
     let config_content = r#"title = "My App Config"
-
+author = "Gato"
+ignore = ["target"]
 [compression]
 method = "Zstd"
 level = 1"#;
-
-    fs::write(root_dir.join("config.toml"), config_content).expect("Failed to create config.toml");
-
+    let gato_config = PathBuf::new().join("gato.toml");
+    if gato_config.exists() == false {
+        fs::write(gato_config, config_content).expect("Failed to create gato.toml");
+    }
     fs::File::create(root_dir.join("index")).expect("Failed to create index file");
 }
 

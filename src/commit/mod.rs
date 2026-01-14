@@ -7,62 +7,97 @@ use std::{
 
 use bincode::{
     Decode, Encode,
-    config::{self, Configuration},
+    config::{self},
     decode_from_slice, encode_to_vec,
 };
 use blake3::hash;
 
-use crate::add::{chunker::IndexData, get_branch_head, index::Index};
+use crate::{
+    add::{get_branch_head, index::Index},
+    commit::{blob::Blob, error::CommitError},
+    config::load::load_config,
+};
+pub mod blob;
+pub mod error;
 
 #[derive(Encode, Decode, Debug, Clone)]
-pub struct Commit {
-    message: String,
-    author: String,
-    timestamp: u64,
-    email: String,
-    tree_hash: Vec<u8>,
-    parent_hash: Option<Vec<u8>>,
+pub enum Commit {
+    V1 {
+        message: String,
+        author: String,
+        timestamp: u64,
+        email: Option<String>,
+        tree_hash: Vec<u8>,
+        parent_hash: Option<Vec<u8>>,
+        dependencies: Vec<String>,
+    },
 }
 
 impl Display for Commit {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let parent_hash_str = match &self.parent_hash {
-            Some(hash) => hex::encode(hash),
-            None => "None".to_string(),
-        };
-        write!(
-            f,
-            "Commit Message: {}\nAuthor: {}\nEmail: {}\nTimestamp: {}\nTree Hash: {}\nParent Hash: {}\n",
-            self.message,
-            self.author,
-            self.email,
-            self.timestamp,
-            hex::encode(&self.tree_hash),
-            parent_hash_str
-        )
+        match self {
+            Commit::V1 {
+                message,
+                author,
+                timestamp,
+                email,
+                tree_hash,
+                parent_hash,
+                dependencies,
+            } => {
+                let parent_hash_str = match parent_hash {
+                    Some(hash) => hex::encode(hash),
+                    None => "None".to_string(),
+                };
+
+                let deps_str = if dependencies.is_empty() {
+                    "None".to_string()
+                } else {
+                    dependencies.join(", ")
+                };
+
+                let email = match email {
+                    Some(email) => email.clone(),
+                    None => "None".to_string(),
+                };
+
+                write!(
+                    f,
+                    "Commit (V1):\nMessage: {}\nAuthor: {}\nEmail: {}\nTimestamp: {}\nTree Hash: {}\nParent Hash: {}\nDependencies: {}\n",
+                    message,
+                    author,
+                    email,
+                    timestamp,
+                    hex::encode(tree_hash),
+                    parent_hash_str,
+                    deps_str
+                )
+            }
+        }
     }
 }
 
 impl Commit {
-    pub fn save(&self) {
-        let data = encode_to_vec(self, config::standard()).expect("Encoding failed");
-        let branch = get_branch_head().expect("Failed to get branch head");
+    pub fn save(&self) -> Result<(), CommitError> {
+        let data = encode_to_vec(self, config::standard())?;
+        let branch = get_branch_head()?;
         let hash = hash(&data);
         let hash_hex = hash.to_hex().to_string();
         let hash_bytes = hash.as_bytes().to_vec();
 
-        let dir_path = format!(".gato/objects/{}", hash_hex[..2].to_string());
-        let file_path = format!("{}/{}", dir_path, hash_hex[2..].to_string());
-        std::fs::create_dir_all(dir_path).expect("Failed to create objects directory");
-        write(file_path, data).expect("Failed to write commit object");
+        let dir_path = PathBuf::new().join(format!(".gato/objects/{}", hash_hex[..2].to_string()));
+        let file_path = dir_path.join(hash_hex[2..].to_string());
+        std::fs::create_dir_all(dir_path)?;
+        write(file_path, data)?;
         write(
             PathBuf::from(".gato")
                 .join("refs")
                 .join("heads")
                 .join(branch),
             hash_bytes,
-        )
-        .unwrap();
+        )?;
+
+        Ok(())
     }
 
     pub fn get_parent_hash() -> Option<Vec<u8>> {
@@ -77,19 +112,21 @@ impl Commit {
         hash
     }
 
-    pub fn new(message: String, author: String) -> Self {
-        let tree_hash = Tree::create_from_index(Index::load().expect("Failed to load index"));
+    pub fn new(message: String) -> Self {
+        let (tree_hash, dependencies) =
+            Tree::create_from_index(Index::load().expect("Failed to load index"));
+        let author = load_config().author;
         let parent_hash = Self::get_parent_hash();
         let timestamp = chrono::Utc::now().timestamp() as u64;
-        let email = format!("{}@gato.com", author);
-
-        Commit {
+        let email = load_config().email;
+        Commit::V1 {
             message,
             author,
             timestamp,
             email,
             tree_hash,
             parent_hash,
+            dependencies,
         }
     }
 
@@ -116,11 +153,13 @@ impl Commit {
         let mut current_hash = Self::get_last_commit_hash()?;
         for _ in 0..index {
             let commit = Commit::load(current_hash);
-            match commit.parent_hash {
-                Some(parent_hash) => {
-                    current_hash = hex::encode(parent_hash);
-                }
-                None => return None,
+            match commit {
+                Commit::V1 { parent_hash, .. } => match parent_hash {
+                    Some(parent_hash) => {
+                        current_hash = hex::encode(parent_hash);
+                    }
+                    None => return None,
+                },
             }
         }
         Some(current_hash)
@@ -132,12 +171,19 @@ impl Commit {
         Some(commit)
     }
 
-    pub fn write_tree(&self, out_path: &Path) {
-        let tree_hash_hex = hex::encode(&self.tree_hash);
+    pub fn tree_hash(&self) -> Vec<u8> {
+        match self {
+            Commit::V1 { tree_hash, .. } => tree_hash.clone(),
+        }
+    }
+
+    pub fn write_tree(&self, out_path: &Path) -> Result<(), CommitError> {
+        let tree_hash_hex = hex::encode(&self.tree_hash());
         let tree = Tree::load(tree_hash_hex);
         for entry in tree.entries {
-            entry.write(out_path);
+            entry.write(out_path)?;
         }
+        Ok(())
     }
 }
 
@@ -148,7 +194,7 @@ enum TreeEntry {
 }
 
 impl TreeEntry {
-    fn write(&self, parent_path: &Path) {
+    fn write(&self, parent_path: &Path) -> Result<(), CommitError> {
         match self {
             TreeEntry::Blob(name, hash) => {
                 let hash_hex = hex::encode(hash);
@@ -157,25 +203,11 @@ impl TreeEntry {
                     &hash_hex[..2],
                     &hash_hex[2..]
                 ));
-
                 let path = parent_path.join(name);
-                let blob = crate::add::smart_read(&compressed_file_path);
-                match blob {
-                    Ok(v) => {
-                        if let Ok((chunk, _)) =
-                            decode_from_slice::<IndexData, Configuration>(&v, config::standard())
-                        {
-                            chunk.restore_file(&path).expect("cannot restore file");
-                        } else {
-                            let decompressed_data = crate::add::decompress(&v).unwrap();
-                            write(&path, decompressed_data)
-                                .expect(&format!("cannot write file: {name}"));
-                        }
-                    }
-                    Err(_) => {
-                        panic!("cannot read file: {}", name)
-                    }
-                }
+                let blob = crate::add::smart_read(&compressed_file_path)?;
+
+                let data: Blob = decode_from_slice(&blob, config::standard())?.0;
+                data.restore(path)?;
             }
             TreeEntry::Tree(name, items) => {
                 let tree_hash_hex = hex::encode(items);
@@ -183,10 +215,11 @@ impl TreeEntry {
                 let dir_path = parent_path.join(name);
                 fs::create_dir_all(&dir_path).expect("cannot create directory!");
                 for entry in tree.entries {
-                    entry.write(&dir_path);
+                    entry.write(&dir_path)?;
                 }
             }
         }
+        Ok(())
     }
 }
 
@@ -240,13 +273,14 @@ impl Tree {
     }
 
     // save the tree object to .gato/objects/<first 2 chars>/<rest chars>
-    fn save(&self) {
+    fn save(&self) -> String {
         let tree_hash = self.hash_str();
         let tree_data = self.tree_bytes();
         let dir_path = format!(".gato/objects/{}", tree_hash[..2].to_string());
         let file_path = format!("{}/{}", dir_path, tree_hash[2..].to_string());
         std::fs::create_dir_all(dir_path).expect("Failed to create objects directory");
         std::fs::write(file_path, tree_data).expect("Failed to write tree object");
+        tree_hash
     }
     // load tree object from .gato/objects/<first 2 chars>/<rest chars>
     fn load(hash: String) -> Self {
@@ -262,23 +296,29 @@ impl Tree {
         tree
     }
     // return hash of the root tree created from index
-    pub fn create_from_index(index: Index) -> Vec<u8> {
+    pub fn create_from_index(index: Index) -> (Vec<u8>, Vec<String>) {
+        let mut file_dependencies = index.dependencies;
         let entries: Vec<(PathBuf, Vec<u8>)> = index
             .entries
             .into_iter()
             .map(|(path, entry)| (path, entry.hash))
             .collect();
 
-        let root_tree_entry = Self::build_recursive_tree(entries, "root".to_string());
+        let root_tree_entry =
+            Self::build_recursive_tree(entries, "root".to_string(), &mut file_dependencies);
 
         match root_tree_entry {
-            TreeEntry::Tree(_, hash) => hash,
+            TreeEntry::Tree(_, hash) => (hash, file_dependencies),
             _ => panic!("Root is not a tree!"),
         }
     }
 
     // recursively build tree from entries
-    fn build_recursive_tree(entries: Vec<(PathBuf, Vec<u8>)>, name: String) -> TreeEntry {
+    fn build_recursive_tree(
+        entries: Vec<(PathBuf, Vec<u8>)>,
+        name: String,
+        dependencies: &mut Vec<String>,
+    ) -> TreeEntry {
         let mut current_tree = Tree::new(name.clone());
 
         let mut groups: BTreeMap<String, Vec<(PathBuf, Vec<u8>)>> = BTreeMap::new();
@@ -302,11 +342,14 @@ impl Tree {
         }
 
         for (folder_name, sub_entries) in groups {
-            let subtree_entry = Self::build_recursive_tree(sub_entries, folder_name);
+            let subtree_entry = Self::build_recursive_tree(sub_entries, folder_name, dependencies);
             current_tree.add_entry(subtree_entry);
         }
 
-        current_tree.save();
+        let tree_hash = current_tree.save();
+
+        dependencies.push(tree_hash);
+
         current_tree.into_entry()
     }
 }

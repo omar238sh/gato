@@ -5,13 +5,16 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use bincode::{Decode, Encode, encode_to_vec};
+use bincode::{Decode, Encode};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use serde::{Deserialize, Serialize};
 
-use crate::add::{
-    FileContent, compress, compute_hash, get_file_metadata, index::IndexEntry, smart_read,
-    write_blob,
+use crate::{
+    add::{
+        FileContent, compress, compute_hash, get_file_metadata, index::IndexEntry, smart_read,
+        write_blob,
+    },
+    commit::{blob::Blob, error::CommitError},
 };
 
 pub fn cut(data: &FileContent) -> Vec<&[u8]> {
@@ -32,10 +35,7 @@ pub fn process_chunk(chunks: Vec<&[u8]>) -> ChunkerResult {
     let a: Vec<(Vec<u8>, Option<Vec<u8>>)> = chunks
         .par_iter()
         .map(|chunk| {
-            let hash = compute_hash(chunk)
-                .expect("failed to compute hash")
-                .as_bytes()
-                .to_vec();
+            let hash = compute_hash(chunk).to_vec();
             let out_path = PathBuf::from(".gato")
                 .join("objects")
                 .join(hex::encode(&hash)[..2].to_string())
@@ -121,23 +121,30 @@ impl ChunkerResult {
         });
     }
 
-    pub fn index_data(&self) -> Vec<u8> {
+    pub fn index_data(&self) -> Result<Vec<u8>, CommitError> {
         let index_data = IndexData {
             path: self.ordered_hashes.clone(),
         };
-        let bindata = encode_to_vec(index_data, bincode::config::standard())
-            .expect("failed to encode index data");
-        bindata
+        let blob_data = Blob::ChunksMap(index_data);
+        let bindata = blob_data.encode()?;
+        Ok(bindata)
     }
 }
 
-pub fn add_as_chunk(path: &Path) -> io::Result<(PathBuf, IndexEntry)> {
+pub fn add_as_chunk(path: &Path) -> Result<(PathBuf, IndexEntry, Vec<String>), CommitError> {
     let buffer = smart_read(path)?;
 
     let chunker_result = process_chunk(cut(&buffer));
+    let mut hashs: Vec<String> = chunker_result
+        .ordered_hashes
+        .clone()
+        .iter()
+        .map(|e| hex::encode(e))
+        .collect();
     chunker_result.save_chunks();
-    let file_data = chunker_result.index_data();
+    let file_data = chunker_result.index_data()?;
     let file_hash = blake3::hash(&file_data).as_bytes().to_vec();
+    hashs.push(hex::encode(file_hash.clone()));
     let target_path = PathBuf::from(".gato")
         .join("objects")
         .join(hex::encode(&file_hash)[..2].to_string())
@@ -150,5 +157,5 @@ pub fn add_as_chunk(path: &Path) -> io::Result<(PathBuf, IndexEntry)> {
         mtime: metadata.mtime() as u32,
         mode: metadata.mode(),
     };
-    Ok((path.to_owned(), index))
+    Ok((path.to_owned(), index, hashs))
 }

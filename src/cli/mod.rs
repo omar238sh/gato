@@ -21,7 +21,7 @@ pub enum Commands {
         about = "Record changes to the repository",
         alias = "c"
     )]
-    Commit { message: String, author: String },
+    Commit { message: String },
     #[clap(
         name = "status",
         about = "Show the working tree status (not implemented yet!)",

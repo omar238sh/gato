@@ -1,6 +1,6 @@
 [package]
 name = "gato"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 
 [dependencies]
@@ -14,5 +14,6 @@ hex = "0.4.3"
 memmap2 = "0.9.9"
 rayon = "1.11.0"
 serde = { version = "1.0.228", features = ["derive"] }
+thiserror = "2.0.17"
 toml = "0.9.10"
 zstd = "0.13.3"

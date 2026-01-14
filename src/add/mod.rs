@@ -2,6 +2,7 @@ use flate2::Compression;
 
 use memmap2::Mmap;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+
 use std::fs::read_dir;
 use std::io::Write;
 use std::io::{self, Read};
@@ -12,6 +13,8 @@ use std::path::{Path, PathBuf};
 
 use crate::add::chunker::add_as_chunk;
 use crate::add::index::{Index, IndexEntry};
+use crate::commit::blob::Blob;
+use crate::commit::error::CommitError;
 use crate::config::load::load_config;
 pub mod chunker;
 pub mod index;
@@ -170,15 +173,16 @@ pub fn get_file_metadata(path: &Path) -> io::Result<std::fs::Metadata> {
     std::fs::metadata(path)
 }
 
-pub fn compute_hash(data: &[u8]) -> io::Result<String> {
+pub fn compute_hash(data: &[u8]) -> [u8; 32] {
     let hash = blake3::hash(&data);
-    let hash_str = hash.to_hex().to_string();
-    Ok(hash_str)
+    let hash = hash.as_bytes();
+    *hash
 }
 
-pub fn add_file(file_path: &Path) -> io::Result<IndexEntry> {
+pub fn add_file(file_path: &Path) -> Result<IndexEntry, CommitError> {
     let buffer = smart_read(file_path)?;
-    let hash_str = compute_hash(&buffer)?;
+    let hash = compute_hash(&buffer);
+    let hash_str = hex::encode(hash);
     let exist = {
         let out_path = PathBuf::from(".gato")
             .join("objects")
@@ -188,17 +192,18 @@ pub fn add_file(file_path: &Path) -> io::Result<IndexEntry> {
     };
     if !exist {
         let compressed_data = compress(&buffer)?;
+        let data = Blob::Normal(compressed_data);
 
         let out_path = PathBuf::from(".gato")
             .join("objects")
             .join(&hash_str[..2])
             .join(&hash_str[2..]);
-        write_blob(&compressed_data, out_path.as_path())?;
+        write_blob(&data.encode()?, out_path.as_path())?;
     }
 
     let metadata = get_file_metadata(file_path)?;
     let index_entry = index::IndexEntry {
-        hash: hash_str.as_bytes().to_vec(),
+        hash: hash.to_vec(),
         size: metadata.len(),
         mtime: metadata.modified()?.elapsed().unwrap().as_secs() as u32,
         #[cfg(unix)]
@@ -210,25 +215,28 @@ pub fn add_file(file_path: &Path) -> io::Result<IndexEntry> {
     Ok(index_entry)
 }
 
-pub fn add_all(paths: Vec<PathBuf>) -> io::Result<()> {
+pub fn add_all(paths: Vec<PathBuf>) -> Result<(), CommitError> {
     let mut index = Index::load().unwrap_or(Index::new());
-    let new_entries: Vec<io::Result<(PathBuf, IndexEntry)>> = paths
+    let new_entries: Vec<Result<(PathBuf, IndexEntry, Vec<String>), CommitError>> = paths
         .par_iter()
         .map(|path| {
             let file_len = get_file_metadata(path)?.len();
             if file_len < 1024 * 1024 * 8 {
                 let entry = add_file(&path)?;
-                Ok((path.clone(), entry))
+                let deps = vec![hex::encode(&entry.hash)];
+                Ok((path.clone(), entry, deps))
             } else {
-                dbg!("big file devide to chunks");
-                add_as_chunk(path)
+                let (path, entry, hashs) = add_as_chunk(path)?;
+
+                Ok((path, entry, hashs))
             }
         })
         .collect();
     for result in new_entries {
         match result {
-            Ok((path, entry)) => {
-                index.add_entry(path, entry);
+            Ok((path, entry, deps)) => {
+                index.add_entry(path, entry.clone());
+                index.dependencies.extend(deps);
             }
             Err(e) => {
                 eprintln!("Failed to process file: {}", e);
@@ -241,19 +249,7 @@ pub fn add_all(paths: Vec<PathBuf>) -> io::Result<()> {
 }
 
 pub fn read_gatoignore() -> Vec<String> {
-    let path = Path::new(".gatoignore");
-
-    if !path.exists() {
-        return Vec::new();
-    }
-
-    std::fs::read_to_string(path)
-        .unwrap_or_default()
-        .lines()
-        .map(|line| line.trim())
-        .filter(|line| !line.is_empty() && !line.starts_with('#'))
-        .map(|line| line.to_string())
-        .collect()
+    load_config().ignored()
 }
 
 pub fn is_ignored(path: &Path, ignored_patterns: &[String]) -> bool {

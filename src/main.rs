@@ -24,10 +24,17 @@ fn main() {
             add_paths(paths);
             // println!("[+] Files added successfully.");
         }
-        cli::Commands::Commit { message, author } => {
-            Commit::new(message, author).save();
-            // println!("[+] Commit created successfully.");
-            // Add commit logic here
+        cli::Commands::Commit { message } => {
+            let result = Commit::new(message).save();
+            match result {
+                Ok(()) => {
+                    std::fs::remove_file(PathBuf::from(".gato/index"))
+                        .expect("cannot remove index file");
+                }
+                Err(e) => {
+                    println!("{e}")
+                }
+            }
         }
         cli::Commands::Status => {
             // println!("Displaying status...");
@@ -41,7 +48,10 @@ fn main() {
             let c = Commit::load_by_index(commit_index).expect("cannot load this index");
             println!("{}", c);
             let path = PathBuf::from(".");
-            c.write_tree(&path);
+            match c.write_tree(&path) {
+                Ok(()) => {}
+                Err(e) => println!("{}", e),
+            }
             // Add checkout logic here
         }
         cli::Commands::NewBranch { branch_name } => {

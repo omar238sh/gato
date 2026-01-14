@@ -20,12 +20,20 @@ pub struct IndexEntry {
 #[derive(Encode, Decode, Debug, Clone)]
 pub struct Index {
     pub entries: BTreeMap<PathBuf, IndexEntry>,
+    pub dependencies: Vec<String>,
 }
 
 impl Index {
     pub fn new() -> Self {
         Index {
             entries: BTreeMap::new(),
+            dependencies: Vec::new(),
+        }
+    }
+
+    pub fn add_dependency(&mut self, dependency: String) {
+        if !self.dependencies.contains(&dependency) {
+            self.dependencies.push(dependency);
         }
     }
 

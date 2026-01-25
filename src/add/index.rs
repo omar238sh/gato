@@ -7,7 +7,7 @@ use bincode::{
     config::{self},
 };
 
-const INDEX_FILE: &str = "./.gato/index";
+use crate::storage::local::LocalStorage;
 
 #[derive(Encode, Decode, Debug, Clone)]
 pub struct IndexEntry {
@@ -31,6 +31,10 @@ impl Index {
         }
     }
 
+    fn index_file_path(storage: &LocalStorage) -> PathBuf {
+        storage.repo_path().join("index")
+    }
+
     pub fn add_dependency(&mut self, dependency: String) {
         if !self.dependencies.contains(&dependency) {
             self.dependencies.push(dependency);
@@ -45,18 +49,18 @@ impl Index {
         self.entries.get(path)
     }
 
-    pub fn load() -> std::io::Result<Self> {
-        let data = std::fs::read(INDEX_FILE)?;
+    pub fn load(storage: &LocalStorage) -> std::io::Result<Self> {
+        let data = std::fs::read(Self::index_file_path(&storage))?;
         let (index, _): (Index, usize) =
             bincode::decode_from_slice(&data.as_slice(), config::standard())
                 .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         Ok(index)
     }
 
-    pub fn save(&self) -> std::io::Result<()> {
+    pub fn save(&self, storage: &LocalStorage) -> std::io::Result<()> {
         let encoded: Vec<u8> =
             bincode::encode_to_vec(self, config::standard()).expect("Encoding failed");
-        std::fs::write(INDEX_FILE, encoded)?;
+        std::fs::write(Self::index_file_path(storage), encoded)?;
         Ok(())
     }
 

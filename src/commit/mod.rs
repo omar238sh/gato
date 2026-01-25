@@ -1,7 +1,7 @@
 use std::{
     collections::BTreeMap,
     fmt::Display,
-    fs::{self, write},
+    fs::{self},
     path::{Path, PathBuf},
 };
 
@@ -13,9 +13,10 @@ use bincode::{
 use blake3::hash;
 
 use crate::{
-    add::{get_branch_head, index::Index},
+    add::index::Index,
     commit::{blob::Blob, error::CommitError},
     config::load::load_config,
+    storage::{StorageEngine, local::LocalStorage},
 };
 pub mod blob;
 pub mod error;
@@ -78,45 +79,30 @@ impl Display for Commit {
 }
 
 impl Commit {
-    pub fn save(&self) -> Result<(), CommitError> {
+    pub fn save(&self, storage: &LocalStorage) -> Result<(), CommitError> {
         let data = encode_to_vec(self, config::standard())?;
-        let branch = get_branch_head()?;
+
         let hash = hash(&data);
         let hash_hex = hash.to_hex().to_string();
         let hash_bytes = hash.as_bytes().to_vec();
 
-        let dir_path = PathBuf::new().join(format!(".gato/objects/{}", hash_hex[..2].to_string()));
-        let file_path = dir_path.join(hash_hex[2..].to_string());
-        std::fs::create_dir_all(dir_path)?;
-        write(file_path, data)?;
-        write(
-            PathBuf::from(".gato")
-                .join("refs")
-                .join("heads")
-                .join(branch),
-            hash_bytes,
-        )?;
-
+        storage.put(&hash_hex, data)?;
+        storage.write_ref(storage.get_active_branche(), hash_bytes)?;
         Ok(())
     }
 
-    pub fn get_parent_hash() -> Option<Vec<u8>> {
-        let branch = get_branch_head().expect("Failed to get branch head");
-        let hash = fs::read(
-            PathBuf::from(".gato")
-                .join("refs")
-                .join("heads")
-                .join(branch),
-        )
-        .ok();
+    pub fn get_parent_hash(storage: &LocalStorage) -> Option<Vec<u8>> {
+        let hash = storage.read_ref_vec(storage.get_active_branche()).ok();
         hash
     }
 
-    pub fn new(message: String) -> Self {
-        let (tree_hash, dependencies) =
-            Tree::create_from_index(Index::load().expect("Failed to load index"));
+    pub fn new(message: String, storage: &LocalStorage) -> Self {
+        let (tree_hash, dependencies) = Tree::create_from_index(
+            Index::load(&storage).expect("Failed to load index"),
+            storage,
+        );
         let author = load_config().author;
-        let parent_hash = Self::get_parent_hash();
+        let parent_hash = Self::get_parent_hash(&storage);
         let timestamp = chrono::Utc::now().timestamp() as u64;
         let email = load_config().email;
         Commit::V1 {
@@ -130,29 +116,24 @@ impl Commit {
         }
     }
 
-    pub fn load(hash: String) -> Self {
-        let path = format!(
-            ".gato/objects/{}/{}",
-            hash[..2].to_string(),
-            hash[2..].to_string()
-        );
-        let data = std::fs::read(path).expect("cannot open file!");
+    pub fn load(hash: String, storage: &LocalStorage) -> Self {
+        let data = storage.get(&hash).expect("cannot read this commit");
         let commit: Commit = bincode::decode_from_slice(&data, config::standard())
             .expect("Decoding failed")
             .0;
         commit
     }
 
-    pub fn get_last_commit_hash() -> Option<String> {
-        let hash_bytes = Self::get_parent_hash()?;
+    pub fn get_last_commit_hash(storage: &LocalStorage) -> Option<String> {
+        let hash_bytes = Self::get_parent_hash(&storage)?;
         let hash_str = hex::encode(hash_bytes);
         Some(hash_str)
     }
 
-    pub fn get_hash_from_index(index: usize) -> Option<String> {
-        let mut current_hash = Self::get_last_commit_hash()?;
+    pub fn get_hash_from_index(index: usize, storage: &LocalStorage) -> Option<String> {
+        let mut current_hash = Self::get_last_commit_hash(&storage)?;
         for _ in 0..index {
-            let commit = Commit::load(current_hash);
+            let commit = Commit::load(current_hash, storage);
             match commit {
                 Commit::V1 { parent_hash, .. } => match parent_hash {
                     Some(parent_hash) => {
@@ -165,9 +146,9 @@ impl Commit {
         Some(current_hash)
     }
 
-    pub fn load_by_index(index: usize) -> Option<Self> {
-        let hash = Self::get_hash_from_index(index)?;
-        let commit = Commit::load(hash);
+    pub fn load_by_index(index: usize, storage: &LocalStorage) -> Option<Self> {
+        let hash = Self::get_hash_from_index(index, storage)?;
+        let commit = Commit::load(hash, storage);
         Some(commit)
     }
 
@@ -177,11 +158,11 @@ impl Commit {
         }
     }
 
-    pub fn write_tree(&self, out_path: &Path) -> Result<(), CommitError> {
+    pub fn write_tree(&self, out_path: &Path, storage: &LocalStorage) -> Result<(), CommitError> {
         let tree_hash_hex = hex::encode(&self.tree_hash());
-        let tree = Tree::load(tree_hash_hex);
+        let tree = Tree::load(tree_hash_hex, storage);
         for entry in tree.entries {
-            entry.write(out_path)?;
+            entry.write(out_path, storage)?;
         }
         Ok(())
     }
@@ -194,28 +175,23 @@ enum TreeEntry {
 }
 
 impl TreeEntry {
-    fn write(&self, parent_path: &Path) -> Result<(), CommitError> {
+    fn write(&self, parent_path: &Path, storage: &LocalStorage) -> Result<(), CommitError> {
         match self {
             TreeEntry::Blob(name, hash) => {
                 let hash_hex = hex::encode(hash);
-                let compressed_file_path = PathBuf::new().join(format!(
-                    ".gato/objects/{}/{}",
-                    &hash_hex[..2],
-                    &hash_hex[2..]
-                ));
                 let path = parent_path.join(name);
-                let blob = crate::add::smart_read(&compressed_file_path)?;
+                let blob = storage.get(&hash_hex)?;
 
                 let data: Blob = decode_from_slice(&blob, config::standard())?.0;
-                data.restore(path)?;
+                data.restore(path, storage)?;
             }
             TreeEntry::Tree(name, items) => {
                 let tree_hash_hex = hex::encode(items);
-                let tree = Tree::load(tree_hash_hex);
+                let tree = Tree::load(tree_hash_hex, storage);
                 let dir_path = parent_path.join(name);
                 fs::create_dir_all(&dir_path).expect("cannot create directory!");
                 for entry in tree.entries {
-                    entry.write(&dir_path)?;
+                    entry.write(&dir_path, storage)?;
                 }
             }
         }
@@ -273,30 +249,29 @@ impl Tree {
     }
 
     // save the tree object to .gato/objects/<first 2 chars>/<rest chars>
-    fn save(&self) -> String {
+    fn save(&self, storage: &LocalStorage) -> String {
         let tree_hash = self.hash_str();
         let tree_data = self.tree_bytes();
-        let dir_path = format!(".gato/objects/{}", tree_hash[..2].to_string());
-        let file_path = format!("{}/{}", dir_path, tree_hash[2..].to_string());
-        std::fs::create_dir_all(dir_path).expect("Failed to create objects directory");
-        std::fs::write(file_path, tree_data).expect("Failed to write tree object");
+        match storage.put(&tree_hash, tree_data) {
+            Ok(_) => {}
+            Err(e) => {
+                println!("{e}")
+            }
+        };
         tree_hash
     }
     // load tree object from .gato/objects/<first 2 chars>/<rest chars>
-    fn load(hash: String) -> Self {
-        let path = format!(
-            ".gato/objects/{}/{}",
-            hash[..2].to_string(),
-            hash[2..].to_string()
-        );
-        let data = std::fs::read(path).expect("cannot open file!");
+    fn load(hash: String, storage: &LocalStorage) -> Self {
+        let data = storage
+            .get(&hash)
+            .expect("Failed to load tree from storage");
         let tree: Tree = bincode::decode_from_slice(&data, config::standard())
             .expect("Decoding failed")
             .0;
         tree
     }
     // return hash of the root tree created from index
-    pub fn create_from_index(index: Index) -> (Vec<u8>, Vec<String>) {
+    pub fn create_from_index(index: Index, storage: &LocalStorage) -> (Vec<u8>, Vec<String>) {
         let mut file_dependencies = index.dependencies;
         let entries: Vec<(PathBuf, Vec<u8>)> = index
             .entries
@@ -304,8 +279,12 @@ impl Tree {
             .map(|(path, entry)| (path, entry.hash))
             .collect();
 
-        let root_tree_entry =
-            Self::build_recursive_tree(entries, "root".to_string(), &mut file_dependencies);
+        let root_tree_entry = Self::build_recursive_tree(
+            entries,
+            "root".to_string(),
+            &mut file_dependencies,
+            storage,
+        );
 
         match root_tree_entry {
             TreeEntry::Tree(_, hash) => (hash, file_dependencies),
@@ -318,6 +297,7 @@ impl Tree {
         entries: Vec<(PathBuf, Vec<u8>)>,
         name: String,
         dependencies: &mut Vec<String>,
+        storage: &LocalStorage,
     ) -> TreeEntry {
         let mut current_tree = Tree::new(name.clone());
 
@@ -342,11 +322,12 @@ impl Tree {
         }
 
         for (folder_name, sub_entries) in groups {
-            let subtree_entry = Self::build_recursive_tree(sub_entries, folder_name, dependencies);
+            let subtree_entry =
+                Self::build_recursive_tree(sub_entries, folder_name, dependencies, storage);
             current_tree.add_entry(subtree_entry);
         }
 
-        let tree_hash = current_tree.save();
+        let tree_hash = current_tree.save(storage);
 
         dependencies.push(tree_hash);
 

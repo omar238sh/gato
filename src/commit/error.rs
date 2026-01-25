@@ -2,6 +2,8 @@ use std::io;
 
 use thiserror::Error;
 
+use crate::storage::StorageError;
+
 #[derive(Debug, Error)]
 pub enum CommitError {
     #[error("Storage interaction failed: {0}")]
@@ -12,6 +14,9 @@ pub enum CommitError {
 
     #[error("Deserialization failed: {0}")]
     DecodingError(#[from] bincode::error::DecodeError),
+
+    #[error("Storage Error {0}")]
+    StorageError(#[from] StorageError),
     // #[error("Corrupt or missing index file")]
     // IndexLoadError,
 

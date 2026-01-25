@@ -1,47 +1,33 @@
-use std::{fs, io::Write, path::PathBuf};
+use std::{fs, path::PathBuf};
 
-use crate::commit::Commit;
-
-pub fn create_file_layout() {
-    let root_dir = PathBuf::from(".gato");
-    if root_dir.exists() {
-        println!("Gato repository already initialized.");
-        return;
-    }
-    fs::create_dir(&root_dir).expect("Failed to create .gato directory");
-    let folders_paths = ["objects", "refs/heads", "refs/tags"];
-    for folder in folders_paths {
-        fs::create_dir_all(root_dir.join(folder)).expect("Failed to create folder");
-    }
-
-    fs::write(root_dir.join("HEAD"), "master").expect("Failed to create HEAD file");
-
-    let config_content = r#"title = "My App Config"
-author = "Gato"
-ignore = ["target"]
-[compression]
-method = "Zstd"
-level = 1"#;
-    let gato_config = PathBuf::new().join("gato.toml");
-    if gato_config.exists() == false {
-        fs::write(gato_config, config_content).expect("Failed to create gato.toml");
-    }
-    fs::File::create(root_dir.join("index")).expect("Failed to create index file");
+use crate::{
+    init::lib::new_id,
+    storage::{StorageEngine, StorageError, local::LocalStorage},
+};
+mod error;
+pub mod lib;
+pub fn create_file_layout(global_path: PathBuf, repo_path: PathBuf) -> Result<(), StorageError> {
+    let id = new_id();
+    let pointer = repo_path.join(".gato");
+    let config = include_str!("gato.toml");
+    let config_path = repo_path.join("gato.toml");
+    fs::write(config_path, config)?;
+    fs::write(pointer, &id)?;
+    let storage = LocalStorage::new(global_path, id);
+    storage.setup()?;
+    Ok(())
 }
 
-pub fn new_branch(branch_name: &str) {
-    let commit_hash = Commit::get_parent_hash().expect("Failed to get current commit hash");
-    let branch_path = PathBuf::from(".gato")
-        .join("refs")
-        .join("heads")
-        .join(branch_name);
-    let mut file = std::fs::File::create(&branch_path).expect("Failed to create new branch file");
-    std::fs::File::write(&mut file, &commit_hash).expect("Failed to create new branch");
-    std::fs::write(PathBuf::from(".gato").join("HEAD"), branch_name)
-        .expect("Failed to write to HEAD file");
+pub fn new_branch(branch_name: String, storage: &impl StorageEngine) {
+    match storage.new_branch(branch_name) {
+        Err(e) => println!("{e}"),
+        _ => {}
+    }
 }
 
-pub fn change_branch(branch_name: &str) {
-    std::fs::write(PathBuf::from(".gato").join("HEAD"), branch_name)
-        .expect("Failed to write to HEAD file");
+pub fn change_branch(branch_name: String, storage: &impl StorageEngine) {
+    match storage.change_branch(branch_name) {
+        Err(e) => println!("{e}"),
+        _ => {}
+    }
 }

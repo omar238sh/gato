@@ -1,7 +1,13 @@
+use std::path::PathBuf;
+
+pub mod api;
 #[derive(clap::Parser)]
 #[command(name = "Gato")]
 #[command(about = "A High-Performance, Parallelized Version Control System", long_about = None)]
 pub struct Cli {
+    #[arg(short, long, default_value = ".")]
+    pub path: PathBuf,
+
     #[clap(subcommand)]
     pub command: Commands,
 }
@@ -22,18 +28,7 @@ pub enum Commands {
         alias = "c"
     )]
     Commit { message: String },
-    #[clap(
-        name = "status",
-        about = "Show the working tree status (not implemented yet!)",
-        alias = "s"
-    )]
-    Status,
-    #[clap(
-        name = "log",
-        about = "Show commit logs (not implemented yet!)",
-        alias = "l"
-    )]
-    Log,
+
     #[clap(
         name = "checkout",
         about = "Checkout a specific commit 0 for last commit",
@@ -48,4 +43,10 @@ pub enum Commands {
         alias = "cb"
     )]
     ChangeBranch { branch_name: String },
+    #[clap(
+        name = "commit_index",
+        about = "Reset to a specific commit index",
+        alias = "ci"
+    )]
+    SoftReset { commit_index: usize },
 }

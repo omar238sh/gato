@@ -10,12 +10,17 @@ use std::io::{self, Read};
 use std::ops::Deref;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use crate::add::chunker::add_as_chunk;
 use crate::add::index::{Index, IndexEntry};
 use crate::commit::blob::Blob;
 use crate::commit::error::CommitError;
 use crate::config::load::load_config;
+
+use crate::storage::StorageEngine;
+use crate::storage::local::LocalStorage;
+
 pub mod chunker;
 pub mod index;
 pub enum FileContent {
@@ -45,14 +50,6 @@ impl Deref for FileContent {
         }
     }
 }
-
-// pub fn read_buffer(path: &Path) -> io::Result<Vec<u8>> {
-//     let file = std::fs::File::open(path)?;
-//     let mut buf_reader = io::BufReader::new(file);
-//     let mut contents: Vec<u8> = vec![];
-//     buf_reader.read_to_end(&mut contents)?;
-//     Ok(contents)
-// }
 
 pub fn smart_read(path: &Path) -> io::Result<FileContent> {
     let file = std::fs::File::open(path)?;
@@ -133,19 +130,19 @@ pub fn decompress(data: &[u8]) -> io::Result<Vec<u8>> {
     }
 }
 
-pub fn write_blob(compressed_data: &Vec<u8>, outpath: &Path) -> io::Result<()> {
-    let exist = outpath.exists();
-    if exist {
-        Ok(())
-    } else {
-        if let Some(parent) = outpath.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        let mut out_file = std::fs::File::create(outpath)?;
-        out_file.write_all(&compressed_data)?;
-        Ok(())
-    }
-}
+// pub fn write_blob(compressed_data: &Vec<u8>, outpath: &Path) -> io::Result<()> {
+//     let exist = outpath.exists();
+//     if exist {
+//         Ok(())
+//     } else {
+//         if let Some(parent) = outpath.parent() {
+//             std::fs::create_dir_all(parent)?;
+//         }
+//         let mut out_file = std::fs::File::create(outpath)?;
+//         out_file.write_all(&compressed_data)?;
+//         Ok(())
+//     }
+// }
 
 pub fn find_files(dir_path: &Path) -> io::Result<Vec<PathBuf>> {
     let ignored = read_gatoignore();
@@ -179,26 +176,16 @@ pub fn compute_hash(data: &[u8]) -> [u8; 32] {
     *hash
 }
 
-pub fn add_file(file_path: &Path) -> Result<IndexEntry, CommitError> {
+pub fn add_file(file_path: &Path, storage: &impl StorageEngine) -> Result<IndexEntry, CommitError> {
     let buffer = smart_read(file_path)?;
     let hash = compute_hash(&buffer);
     let hash_str = hex::encode(hash);
-    let exist = {
-        let out_path = PathBuf::from(".gato")
-            .join("objects")
-            .join(&hash_str[..2])
-            .join(&hash_str[2..]);
-        out_path.exists()
-    };
-    if !exist {
+
+    if !storage.exist(&hash_str) {
         let compressed_data = compress(&buffer)?;
         let data = Blob::Normal(compressed_data);
 
-        let out_path = PathBuf::from(".gato")
-            .join("objects")
-            .join(&hash_str[..2])
-            .join(&hash_str[2..]);
-        write_blob(&data.encode()?, out_path.as_path())?;
+        storage.put(&hash_str, data.encode()?)?;
     }
 
     let metadata = get_file_metadata(file_path)?;
@@ -215,18 +202,20 @@ pub fn add_file(file_path: &Path) -> Result<IndexEntry, CommitError> {
     Ok(index_entry)
 }
 
-pub fn add_all(paths: Vec<PathBuf>) -> Result<(), CommitError> {
-    let mut index = Index::load().unwrap_or(Index::new());
+pub fn add_all(paths: Vec<PathBuf>, storage: Arc<LocalStorage>) -> Result<(), CommitError> {
+    let mut index = Index::load(storage.as_ref()).unwrap_or(Index::new());
     let new_entries: Vec<Result<(PathBuf, IndexEntry, Vec<String>), CommitError>> = paths
         .par_iter()
         .map(|path| {
             let file_len = get_file_metadata(path)?.len();
             if file_len < 1024 * 1024 * 8 {
-                let entry = add_file(&path)?;
+                let storage_clone = Arc::clone(&storage);
+                let entry = add_file(&path, storage_clone.as_ref())?;
                 let deps = vec![hex::encode(&entry.hash)];
                 Ok((path.clone(), entry, deps))
             } else {
-                let (path, entry, hashs) = add_as_chunk(path)?;
+                let storage_clone = Arc::clone(&storage);
+                let (path, entry, hashs) = add_as_chunk(path, storage_clone.as_ref())?;
 
                 Ok((path, entry, hashs))
             }
@@ -244,7 +233,7 @@ pub fn add_all(paths: Vec<PathBuf>) -> Result<(), CommitError> {
             }
         }
     }
-    index.save()?;
+    index.save(storage.as_ref())?;
     Ok(())
 }
 
@@ -265,51 +254,9 @@ pub fn is_ignored(path: &Path, ignored_patterns: &[String]) -> bool {
     false
 }
 
-pub fn get_branch_head() -> io::Result<String> {
-    let head_path = Path::new(".gato/HEAD");
-    let head_content = smart_read(head_path)?;
-    let head_str = std::str::from_utf8(&head_content).expect("Invalid UTF-8 in HEAD file");
-    Ok(head_str.trim().to_string())
-}
-
-// #[test]
-// fn compress_test() {
-//     let input_file = Path::new("/home/omar/Downloads/100mb-examplefile-com.txt");
-//     let out_path = Path::new("./compressed.zlib");
-//     let buffer = read_buffer(input_file).unwrap();
-//     let compressed_data = compress(buffer).unwrap();
-//     write_blob(compressed_data, out_path).unwrap();
+// pub fn get_branch_head(storage: &LocalStorage) -> io::Result<String> {
+//     let head_path = storage.repo_path().join("HEAD");
+//     let head_content = smart_read(&head_path)?;
+//     let head_str = String::from_utf8(head_content.to_vec()).expect("Invalid UTF-8 in HEAD file");
+//     Ok(head_str.trim().to_string())
 // }
-
-// #[test]
-// fn find_files_test() {
-//     let dir_path = Path::new("/home/omar/Downloads");
-//     let files = find_files(dir_path).unwrap();
-//     for file in files {
-//         println!("{:?}", file);
-//     }
-// }
-
-// #[test]
-// fn get_file_metadata_test() {
-//     let file_path = Path::new("/home/omar/Downloads/100mb-examplefile-com.txt");
-//     let metadata = get_file_metadata(file_path).unwrap();
-//     println!("File size: {}", metadata.len());
-//     println!("Is file: {}", metadata.is_file());
-//     println!("Is dir: {}", metadata.is_dir());
-//     println!("Readonly: {:?}", metadata.permissions());
-//     // type
-//     println!("Created: {:?}", metadata.created());
-//     println!("Modified: {:?}", metadata.modified());
-//     println!("Accessed: {:?}", metadata.accessed());
-//     println!("type {:?}", metadata.file_type());
-// }
-
-#[test]
-fn print_all_entries() {
-    // let i = Instant::now();
-    let index = Index::load().unwrap();
-    // let time = i.elapsed();
-    // println!("Time taken to load index: {:?}", time);
-    index.debug_print();
-}

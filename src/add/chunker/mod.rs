@@ -10,17 +10,15 @@ use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    add::{
-        FileContent, compress, compute_hash, get_file_metadata, index::IndexEntry, smart_read,
-        write_blob,
-    },
+    add::{FileContent, compress, compute_hash, get_file_metadata, index::IndexEntry, smart_read},
     commit::{blob::Blob, error::CommitError},
+    storage::{StorageEngine, StorageError},
 };
 
 pub fn cut(data: &FileContent) -> Vec<&[u8]> {
     let min_size = 1024 * 1024; // 1 MB
     let max_size = 8 * 1024 * 1024; // 8 MB
-    let avg_size = 4 * 1024 * 1024; // 2 MB
+    let avg_size = 4 * 1024 * 1024; // 4 MB
 
     let chunker = fastcdc::v2020::FastCDC::new(data, min_size, avg_size, max_size);
     chunker
@@ -28,7 +26,7 @@ pub fn cut(data: &FileContent) -> Vec<&[u8]> {
         .collect()
 }
 
-pub fn process_chunk(chunks: Vec<&[u8]>) -> ChunkerResult {
+pub fn process_chunk(chunks: Vec<&[u8]>, storage: &impl StorageEngine) -> ChunkerResult {
     let mut data = BTreeMap::new();
 
     let mut ordered_hash = Vec::new();
@@ -36,12 +34,7 @@ pub fn process_chunk(chunks: Vec<&[u8]>) -> ChunkerResult {
         .par_iter()
         .map(|chunk| {
             let hash = compute_hash(chunk).to_vec();
-            let out_path = PathBuf::from(".gato")
-                .join("objects")
-                .join(hex::encode(&hash)[..2].to_string())
-                .join(hex::encode(&hash)[2..].to_string());
-
-            if !out_path.exists() {
+            if !storage.exist(&hex::encode(&hash)) {
                 let compressed_data = compress(chunk).expect("failed to compress chunk");
                 (hash, Some(compressed_data))
             } else {
@@ -83,16 +76,16 @@ pub struct IndexData {
 }
 
 impl IndexData {
-    pub fn restore_file(self, target_path: &Path) -> io::Result<()> {
+    pub fn restore_file(
+        self,
+        target_path: &Path,
+        storage: &impl StorageEngine,
+    ) -> Result<(), StorageError> {
         let mut file = std::fs::File::create(target_path)?;
         for chunk_hash in &self.path {
             let hash_hex = hex::encode(chunk_hash);
-            let chunk_path = PathBuf::from(".gato")
-                .join("objects")
-                .join(&hash_hex[..2])
-                .join(&hash_hex[2..]);
 
-            let compressed_data = smart_read(&chunk_path)?;
+            let compressed_data = storage.get(&hash_hex)?;
 
             let raw_data = crate::add::decompress(&compressed_data)
                 .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Decompression failed"))?;
@@ -111,13 +104,12 @@ pub struct ChunkerResult {
 }
 
 impl ChunkerResult {
-    pub fn save_chunks(&self) {
+    pub fn save_chunks(&self, storage: &impl StorageEngine) {
         self.chunks.par_iter().for_each(|(hash, data)| {
-            let path = PathBuf::from(".gato")
-                .join("objects")
-                .join(hex::encode(&hash)[..2].to_string())
-                .join(hex::encode(&hash)[2..].to_string());
-            write_blob(data, &path).expect("failed to write chunk!");
+            match storage.put(&hex::encode(hash), data.to_vec()) {
+                Ok(_) => {}
+                Err(e) => println!("{e}"),
+            }
         });
     }
 
@@ -131,25 +123,26 @@ impl ChunkerResult {
     }
 }
 
-pub fn add_as_chunk(path: &Path) -> Result<(PathBuf, IndexEntry, Vec<String>), CommitError> {
+pub fn add_as_chunk(
+    path: &Path,
+    storage: &impl StorageEngine,
+) -> Result<(PathBuf, IndexEntry, Vec<String>), CommitError> {
     let buffer = smart_read(path)?;
 
-    let chunker_result = process_chunk(cut(&buffer));
+    let chunker_result = process_chunk(cut(&buffer), storage);
     let mut hashs: Vec<String> = chunker_result
         .ordered_hashes
         .clone()
         .iter()
         .map(|e| hex::encode(e))
         .collect();
-    chunker_result.save_chunks();
+    chunker_result.save_chunks(storage);
     let file_data = chunker_result.index_data()?;
     let file_hash = blake3::hash(&file_data).as_bytes().to_vec();
-    hashs.push(hex::encode(file_hash.clone()));
-    let target_path = PathBuf::from(".gato")
-        .join("objects")
-        .join(hex::encode(&file_hash)[..2].to_string())
-        .join(hex::encode(&file_hash)[2..].to_string());
-    write_blob(&file_data, &target_path)?;
+    let hash_str = hex::encode(file_hash.clone());
+
+    storage.put(&hash_str, file_data)?;
+    hashs.push(hash_str);
     let metadata = get_file_metadata(path)?;
     let index = IndexEntry {
         hash: file_hash,

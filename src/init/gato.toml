@@ -1,0 +1,6 @@
+title = "My App Config"
+author = "Gato"
+ignore = ["target"]
+[compression]
+method = "Zstd"
+level = 1

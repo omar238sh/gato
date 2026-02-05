@@ -208,7 +208,7 @@ impl LocalStorage {
 
     pub fn delete_repo(&self) -> GatoResult<()> {
         fs::remove_file(self.work_dir().join("gato.toml"))?;
-        fs::remove_dir(self.repo_path())?;
+        fs::remove_dir_all(self.repo_path())?;
         Ok(())
     }
 
@@ -223,8 +223,6 @@ impl LocalStorage {
 
         Ok(())
     }
-    
-    
 }
 
 impl StorageEngine for LocalStorage {

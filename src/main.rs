@@ -57,7 +57,7 @@ fn main() -> GatoResult<()> {
             storage.gc()?;
         }
         Commands::ListRepos => {
-            let storage = LocalStorage::load_from(get_store_path().clone(), cli.path.clone())?;
+            let storage = LocalStorage::tmp(get_store_path().clone());
             let repos_path = storage.list_repos()?;
             for repo in repos_path {
                 println!("{:?}", repo);

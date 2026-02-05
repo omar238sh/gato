@@ -120,5 +120,3 @@ level = 3       # Compression level (1-22 for Zstd)
 ---
 
 **Gato** — *The speed of Rust, the power of parallelism.* 🐾
-
-```

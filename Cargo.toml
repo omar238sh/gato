@@ -2,6 +2,9 @@
 name = "gato"
 version = "0.5.0"
 edition = "2024"
+license = "AGPL-3.0-only"
+authors = ["Omar <omar238sh@gmail.com>"]
+description = "A High-Performance, Parallelized Version Control System"
 
 [dependencies]
 # shared = {path="../shared"}

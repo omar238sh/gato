@@ -13,13 +13,6 @@ pub struct Config {
 #[derive(Debug, Deserialize, Serialize)]
 pub struct CompressionConfig {
     pub level: Option<i32>,
-    pub method: CompressionMethod,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-pub enum CompressionMethod {
-    Zlib,
-    Zstd,
 }
 
 impl Config {

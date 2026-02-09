@@ -1,17 +1,18 @@
-use std::{fs, path::PathBuf, sync::Arc};
+use std::{collections::HashMap, fs, path::PathBuf, sync::Arc};
 
-use bincode::encode_to_vec;
+use bincode::{config, decode_from_slice, encode_to_vec};
+use tracing::instrument;
 
 use crate::core::{
     add::{add_all, find_files, index::Index},
     cli::get_store_path,
-    commit::Commit,
+    commit::{Commit, Tree, blob::Blob},
     config::load::load_config,
     error::{Error, GatoResult},
-    storage::{StorageEngine, StorageError, gc::Gc},
+    storage::{StorageEngine, StorageError, gc::Gc, status::FileStatus},
 };
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct LocalStorage {
     pub root_path: PathBuf,
     repo_id: String,
@@ -19,6 +20,7 @@ pub struct LocalStorage {
 }
 
 impl LocalStorage {
+    #[instrument]
     pub fn new(global_path: PathBuf, repo_id: String, path: PathBuf) -> Self {
         Self {
             root_path: global_path,
@@ -26,20 +28,20 @@ impl LocalStorage {
             work_dir: path,
         }
     }
-
+    #[instrument]
     pub fn objects_path(&self, hash: &String) -> PathBuf {
         self.root_path
             .join("objects")
             .join(&hash[..2])
             .join(&hash[2..])
     }
-
+    #[instrument]
     pub fn get_active_branche(&self) -> String {
         let head_path = self.root_path.join(self.repo_id.to_owned()).join("HEAD");
         let branche = fs::read_to_string(head_path).unwrap_or(String::from("master"));
         branche
     }
-
+    #[instrument]
     pub fn get_branch_path(&self, ref_name: String) -> PathBuf {
         self.root_path
             .join(&self.repo_id)
@@ -55,41 +57,42 @@ impl LocalStorage {
     //         .join("heads")
     //         .join(self.get_active_branche())
     // }
-
+    #[instrument]
     pub fn tmp(store_path: PathBuf) -> Self {
         Self::new(store_path, "".to_string(), PathBuf::new())
     }
-
+    #[instrument]
     pub fn load_from(store_path: PathBuf, work_dir: PathBuf) -> GatoResult<Self> {
         let repo_id = load_config(&work_dir)?.id;
         Ok(Self::new(store_path, repo_id, work_dir))
     }
 
+    #[instrument(fields(branch = "repo_path"))]
     pub fn repo_path(&self) -> PathBuf {
         self.root_path.join(&self.repo_id)
     }
-
+    #[instrument]
     pub fn read_ref_vec(&self, ref_name: String) -> Result<Vec<u8>, StorageError> {
         let ref_path = self.get_branch_path(ref_name);
         fs::read(ref_path).map_err(|_| StorageError::ReadError)
     }
-
+    #[instrument]
     pub fn work_dir(&self) -> &PathBuf {
         &self.work_dir
     }
-
+    #[instrument]
     pub fn add_paths(&self, paths: Vec<String>) -> GatoResult<()> {
         add_paths(paths, self)?;
         Ok(())
     }
-
+    #[instrument]
     pub fn commit(&self, message: String) -> GatoResult<()> {
         let commit = Commit::new(message, &self)?;
         commit.save(&self)?;
         fs::remove_file(Index::index_file_path(&self))?;
         Ok(())
     }
-
+    #[instrument]
     pub fn check_out(&self, commit_index: usize) -> GatoResult<()> {
         if let Some(commit) = Commit::load_by_index(commit_index, &self) {
             commit.write_tree(&self.work_dir(), &self)?;
@@ -98,7 +101,7 @@ impl LocalStorage {
         }
         Ok(())
     }
-
+    #[instrument]
     pub fn soft_reset(&self, commit_index: usize) {
         if let Some(hash) = Commit::get_hash_from_index(commit_index, &self) {
             if let Ok(bytes) = hex::decode(hash) {
@@ -108,7 +111,7 @@ impl LocalStorage {
             }
         }
     }
-
+    #[instrument]
     pub fn repo_id(&self) -> &str {
         &self.repo_id
     }
@@ -116,7 +119,7 @@ impl LocalStorage {
     // pub fn init(path: PathBuf) {
     //     init(path)
     // }
-
+    #[instrument]
     pub fn list_repos(&self) -> GatoResult<Vec<PathBuf>> {
         let repos_path = self.root_path.join("repos");
         let past_data = fs::read(repos_path);
@@ -126,7 +129,7 @@ impl LocalStorage {
         };
         Ok(data)
     }
-
+    #[instrument]
     pub fn push_to_repos(&self) -> GatoResult<()> {
         let mut data = self.list_repos()?;
         data.push(self.work_dir().canonicalize()?.to_owned());
@@ -136,13 +139,13 @@ impl LocalStorage {
         )?;
         Ok(())
     }
-
+    #[instrument]
     fn remove(&self, hash: &String) -> GatoResult<()> {
         let object_path = self.objects_path(hash);
         fs::remove_file(object_path)?;
         Ok(())
     }
-
+    #[instrument]
     pub fn list_branchs(&self) -> GatoResult<Vec<String>> {
         let path = self
             .root_path
@@ -160,7 +163,7 @@ impl LocalStorage {
 
         Ok(branchs_names)
     }
-
+    #[instrument]
     pub fn list_files(&self) -> GatoResult<Vec<String>> {
         let objects_dir = self.root_path.join("objects");
         let mut hashes: Vec<String> = Vec::new();
@@ -182,7 +185,7 @@ impl LocalStorage {
 
         Ok(hashes)
     }
-
+    #[instrument]
     pub fn gc(&self) -> GatoResult<()> {
         let repos: Vec<_> = self
             .list_repos()?
@@ -205,13 +208,13 @@ impl LocalStorage {
 
         Ok(())
     }
-
+    #[instrument]
     pub fn delete_repo(&self) -> GatoResult<()> {
         fs::remove_file(self.work_dir().join("gato.toml"))?;
         fs::remove_dir_all(self.repo_path())?;
         Ok(())
     }
-
+    #[instrument]
     pub fn delete_branch(&self, name: String) -> GatoResult<()> {
         let active_branch = self.get_active_branche();
 
@@ -223,15 +226,78 @@ impl LocalStorage {
 
         Ok(())
     }
+    #[instrument]
+    pub fn status(&self) -> GatoResult<()> {
+        let all_files = get_all_files(vec![".".to_string()], self);
+        let mut index: HashMap<_, _> = Index::load(&self)
+            .map_err(|_| Error::NoFilesAddedError)?
+            .entries
+            .into_iter()
+            .map(|(a, entry)| (a, hex::encode(entry.hash)))
+            .collect();
+        let mut deps = Vec::new();
+        if let Some(last_commit) = Commit::load_by_index(0, &self) {
+            deps = last_commit.dependices();
+        }
+
+        println!("Changes to be committed:");
+        for file_path in all_files {
+            let i = index.remove(&file_path);
+            let file_status = FileStatus::from(file_path, &deps, i, &self)?;
+            match file_status {
+                FileStatus::Unmodified => {}
+                _ => println!("{file_status}"),
+            }
+        }
+
+        Ok(())
+    }
+    #[instrument]
+    pub fn get_as_string(&self, hash: &String) -> GatoResult<String> {
+        let data = self.get(hash)?;
+        let file: Blob = decode_from_slice(&data, config::standard())?.0;
+        Ok(String::from_utf8(file.restore_data()?)?)
+    }
+    #[instrument]
+    pub fn merge(&self, target_branch: String, message: String) -> GatoResult<()> {
+        let current_hash = self.read_ref_vec(self.get_active_branche())?;
+        let current_commit = Commit::load(hex::encode(&current_hash), &self);
+        let current_tree = Tree::load(hex::encode(current_commit.tree_hash()), self)?;
+
+        let target_hash = self.read_ref_vec(target_branch)?;
+        let target_commit = Commit::load(hex::encode(&target_hash), self);
+        let target_tree = Tree::load(hex::encode(target_commit.tree_hash()), self)?;
+
+        let base = Commit::base(&current_commit, &target_commit, self);
+        let base_tree = if let Some(base_commit) = base {
+            Tree::load(hex::encode(base_commit.tree_hash()), self)?
+        } else {
+            Tree::new("root".to_string())
+        };
+        let mut deps: Vec<String> = Vec::new();
+        let merged = Tree::merge(base_tree, current_tree, target_tree, &mut deps, self)?;
+
+        let new_commit = Commit::new_merged(
+            message,
+            merged.hash(),
+            current_hash,
+            target_hash,
+            deps,
+            self,
+        )?;
+        new_commit.save(self)?;
+        Ok(())
+    }
 }
 
 impl StorageEngine for LocalStorage {
+    #[instrument]
     fn get(&self, hash: &String) -> Result<Vec<u8>, super::StorageError> {
         let object_path = self.objects_path(hash);
         let data = fs::read(object_path).map_err(|_| StorageError::ReadError);
         data
     }
-
+    #[instrument]
     fn put(&self, hash: &String, data: Vec<u8>) -> Result<(), super::StorageError> {
         if !self.exist(hash) {
             let object_path = self.objects_path(hash);
@@ -244,11 +310,11 @@ impl StorageEngine for LocalStorage {
         }
         Ok(())
     }
-
+    #[instrument]
     fn exist(&self, hash: &String) -> bool {
         self.objects_path(hash).exists()
     }
-
+    #[instrument]
     fn write_ref(&self, ref_name: String, hash: Vec<u8>) -> Result<(), super::StorageError> {
         let ref_path = self.get_branch_path(ref_name);
 
@@ -262,13 +328,13 @@ impl StorageEngine for LocalStorage {
     // fn read_ref(&self, ref_name: String) -> Result<String, super::StorageError> {
     //     self.read_ref_vec(ref_name).map(|a| hex::encode(a))
     // }
-
+    #[instrument]
     fn setup(&self) -> Result<(), StorageError> {
         let heads_path = self.repo_path().join("refs").join("heads");
         std::fs::create_dir_all(heads_path).map_err(|_| StorageError::WriteError)?;
         Ok(())
     }
-
+    #[instrument]
     fn new_branch(&self, name: String) -> Result<(), StorageError> {
         let branch_path = self.get_branch_path(name);
         if let Some(parent) = branch_path.parent() {
@@ -277,14 +343,20 @@ impl StorageEngine for LocalStorage {
         fs::write(branch_path, self.read_ref_vec(self.get_active_branche())?)
             .map_err(|_| StorageError::WriteError)
     }
-
+    #[instrument]
     fn change_branch(&self, name: String) -> Result<(), StorageError> {
         fs::write(self.repo_path().join("HEAD"), name)?;
         Ok(())
     }
 }
-
+#[instrument]
 fn add_paths(paths: Vec<String>, storage: &LocalStorage) -> GatoResult<()> {
+    let all_files = get_all_files(paths, storage);
+    add_all(all_files, Arc::new(storage.clone()))?;
+    Ok(())
+}
+#[instrument]
+fn get_all_files(paths: Vec<String>, storage: &LocalStorage) -> Vec<PathBuf> {
     let mut all_files: Vec<PathBuf> = Vec::new();
 
     for path in paths {
@@ -309,6 +381,5 @@ fn add_paths(paths: Vec<String>, storage: &LocalStorage) -> GatoResult<()> {
             );
         }
     }
-    add_all(all_files, Arc::new(storage.clone()))?;
-    Ok(())
+    all_files
 }

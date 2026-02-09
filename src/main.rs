@@ -1,6 +1,7 @@
 use std::{path::PathBuf, sync::OnceLock};
 
 use clap::Parser;
+use colored::Colorize;
 use directories::ProjectDirs;
 mod core;
 use crate::core::{
@@ -23,7 +24,7 @@ pub fn get_store_path() -> &'static PathBuf {
     })
 }
 
-fn main() -> GatoResult<()> {
+fn run() -> GatoResult<()> {
     let cli = Cli::parse();
 
     match cli.command {
@@ -73,6 +74,29 @@ fn main() -> GatoResult<()> {
             storage.delete_branch(name)?;
             println!("you may need to run `gato gc`.");
         }
+        Commands::Status => {
+            let storage = LocalStorage::load_from(get_store_path().clone(), cli.path.clone())?;
+            storage.status()?;
+        }
+        Commands::Merge {
+            target_branch,
+            message,
+        } => {
+            let storage = LocalStorage::load_from(get_store_path().clone(), cli.path.clone())?;
+            storage.merge(target_branch, message)?;
+        }
     };
     Ok(())
+}
+
+fn main() {
+    tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .with_target(false)
+        .init();
+
+    match run() {
+        Ok(_) => {}
+        Err(e) => println!("{}: {}", "Error".red().bold(), e),
+    }
 }

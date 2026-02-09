@@ -72,4 +72,17 @@ pub enum Commands {
         alias = "db"
     )]
     DeleteBranch { name: String },
+
+    #[clap(name = "status", about = "Show the working tree status", alias = "st")]
+    Status,
+
+    #[clap(
+        name = "merge",
+        about = "Merge a branch into the current branch",
+        alias = "m"
+    )]
+    Merge {
+        target_branch: String,
+        message: String,
+    },
 }

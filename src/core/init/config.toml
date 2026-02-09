@@ -1,8 +1,14 @@
+
 title = "My App Config"
+
 id = "<repo_id>"
+
 author = "Gato"
+
 description = "Gato Repo description"
+
 ignore = ["target"]
+
 [compression]
-method = "Zstd"
+
 level = 1

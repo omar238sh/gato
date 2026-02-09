@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::core::{
     add::{FileContent, compress, compute_hash, get_file_metadata, index::IndexEntry, smart_read},
     commit::{blob::Blob, error::CommitError},
+    error::GatoResult,
     storage::{StorageEngine, StorageError, local::LocalStorage},
 };
 
@@ -88,7 +89,7 @@ impl IndexData {
 
             let compressed_data = storage.get(&hash_hex)?;
 
-            let raw_data = crate::core::add::decompress(&compressed_data, storage.work_dir())
+            let raw_data = crate::core::add::decompress(&compressed_data)
                 .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Decompression failed"))?;
 
             file.write_all(&raw_data)?;
@@ -152,4 +153,17 @@ pub fn add_as_chunk(
         mode: metadata.mode(),
     };
     Ok((path.to_owned(), index, hashs))
+}
+
+pub fn get_dry_chunck_hash(path: &Path, storage: &LocalStorage) -> GatoResult<String> {
+    let buffer = smart_read(path)?;
+
+    let chunker_result = process_chunk(cut(&buffer), storage);
+
+    // chunker_result.save_chunks(storage);
+    let file_data = chunker_result.index_data()?;
+    let file_hash = blake3::hash(&file_data).as_bytes().to_vec();
+    let hash_str = hex::encode(file_hash.clone());
+
+    Ok(hex::encode(hash_str))
 }

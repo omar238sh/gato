@@ -1,5 +1,3 @@
-use flate2::Compression;
-
 use memmap2::Mmap;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 
@@ -12,7 +10,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::core::add::chunker::add_as_chunk;
+use crate::core::add::chunker::{add_as_chunk, get_dry_chunck_hash};
 use crate::core::add::index::{Index, IndexEntry};
 use crate::core::commit::blob::Blob;
 use crate::core::config::load::load_config;
@@ -67,13 +65,6 @@ pub fn smart_read(path: &Path) -> io::Result<FileContent> {
     }
 }
 
-pub fn compress_zlib(data: &[u8]) -> GatoResult<Vec<u8>> {
-    let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), Compression::fast());
-    encoder.write_all(&*data)?;
-    let compressed = encoder.finish()?;
-    Ok(compressed)
-}
-
 fn compress_zstd(data: &[u8], level: i32) -> GatoResult<Vec<u8>> {
     let mut encoder = zstd::stream::write::Encoder::new(Vec::new(), level)
         .expect("Failed to create zstd encoder");
@@ -82,13 +73,6 @@ fn compress_zstd(data: &[u8], level: i32) -> GatoResult<Vec<u8>> {
         .expect("Failed to write data to zstd encoder");
     let compressed_data = encoder.finish()?;
     Ok(compressed_data)
-}
-
-pub fn decompress_zlib(data: &[u8]) -> GatoResult<Vec<u8>> {
-    let mut decoder = flate2::read::ZlibDecoder::new(&data[..]);
-    let mut decompressed_data = Vec::new();
-    decoder.read_to_end(&mut decompressed_data)?;
-    Ok(decompressed_data)
 }
 
 pub fn decompress_zstd(data: &[u8]) -> GatoResult<Vec<u8>> {
@@ -104,30 +88,17 @@ pub fn decompress_zstd(data: &[u8]) -> GatoResult<Vec<u8>> {
 pub fn compress(data: &[u8], work_dir: &PathBuf) -> GatoResult<Vec<u8>> {
     let config = load_config(work_dir)?;
     match config.compression {
-        Some(v) => match v.method {
-            crate::core::config::CompressionMethod::Zlib => {
-                return compress_zlib(data);
-            }
-            crate::core::config::CompressionMethod::Zstd => {
-                return compress_zstd(data, v.level.unwrap_or(1));
-            }
-        },
+        Some(v) => {
+            return compress_zstd(data, v.level.unwrap_or(1));
+        }
         None => {
             return compress_zstd(data, 1);
         }
     }
 }
 
-pub fn decompress(data: &[u8], work_dir: &PathBuf) -> GatoResult<Vec<u8>> {
-    let config = load_config(work_dir)?;
-
-    match config.compression {
-        Some(v) => match v.method {
-            crate::core::config::CompressionMethod::Zlib => decompress_zlib(data),
-            crate::core::config::CompressionMethod::Zstd => decompress_zstd(data),
-        },
-        None => decompress_zstd(data),
-    }
+pub fn decompress(data: &[u8]) -> GatoResult<Vec<u8>> {
+    decompress_zstd(data)
 }
 
 // pub fn write_blob(compressed_data: &Vec<u8>, outpath: &Path) -> io::Result<()> {
@@ -176,6 +147,19 @@ pub fn compute_hash(data: &[u8]) -> [u8; 32] {
     *hash
 }
 
+pub fn add_file_dry(buffer: &[u8], storage: &LocalStorage) -> GatoResult<Vec<u8>> {
+    let hash = compute_hash(&buffer);
+    let hash_str = hex::encode(hash);
+
+    if !storage.exist(&hash_str) {
+        let compressed_data = compress(&buffer, storage.work_dir())?;
+        let data = Blob::Normal(compressed_data);
+
+        storage.put(&hash_str, data.encode()?)?;
+    }
+    Ok(hash.to_vec())
+}
+
 pub fn add_file(file_path: &Path, storage: &LocalStorage) -> GatoResult<index::IndexEntry> {
     let buffer = smart_read(file_path)?;
     let hash = compute_hash(&buffer);
@@ -200,6 +184,18 @@ pub fn add_file(file_path: &Path, storage: &LocalStorage) -> GatoResult<index::I
     };
 
     Ok(index_entry)
+}
+
+pub fn get_dry_hash(file_path: &Path, storage: &LocalStorage) -> GatoResult<String> {
+    let file_len = get_file_metadata(&storage.work_dir().join(file_path))?.len();
+    if file_len < 1024 * 1024 * 8 {
+        let buffer = smart_read(file_path)?;
+        let hash = compute_hash(&buffer);
+        let hash_str = hex::encode(hash);
+        Ok(hash_str)
+    } else {
+        get_dry_chunck_hash(file_path, storage)
+    }
 }
 
 pub fn add_all(paths: Vec<PathBuf>, storage: Arc<LocalStorage>) -> GatoResult<()> {

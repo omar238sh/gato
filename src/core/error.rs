@@ -27,6 +27,17 @@ pub enum Error {
 
     #[error("Cannot delete the active branch")]
     ActiveBranchDeletionError,
+
+    #[error("you don't add any file after last commit")]
+    NoFilesAddedError,
+
+    #[error("Merge conflict detected in file: {0}")]
+    MergeConflict(String),
+
+    #[error("cannot restore data from blob")]
+    RestoreDataError,
+    #[error("UTF-8 conversion error")]
+    FromUTF8Error(#[from] std::string::FromUtf8Error),
 }
 
 pub type GatoResult<T> = std::result::Result<T, Error>;

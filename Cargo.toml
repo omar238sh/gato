@@ -1,6 +1,6 @@
 [package]
 name = "gato"
-version = "0.5.0"
+version = "0.6.0"
 edition = "2024"
 license = "AGPL-3.0-only"
 authors = ["Omar <omar238sh@gmail.com>"]
@@ -11,7 +11,7 @@ description = "A High-Performance, Parallelized Version Control System"
 blake3 = "1.8.2"
 chrono = "0.4.42"
 fastcdc = "3.2.1"
-flate2 = { version = "1.1.5", features = ["zlib"] }
+
 hex = "0.4.3"
 memmap2 = "0.9.9"
 rayon = "1.11.0"
@@ -24,3 +24,7 @@ thiserror = "2.0.17"
 serde = {version = "1.0.228" , features=["derive"]}
 
 clap = { version = "4.5.51", features = ["derive", "env"] }
+colored = "3.1.1"
+diffy = "0.4.2"
+tracing = {version = "0.1.44" , features = ["max_level_debug", "release_max_level_info"]}
+tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }

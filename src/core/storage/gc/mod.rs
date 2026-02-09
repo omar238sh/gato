@@ -1,18 +1,22 @@
+use tracing::instrument;
+
 use crate::core::{
     commit::Commit,
     error::{Error, GatoResult},
     storage::local::LocalStorage,
 };
 
+#[derive(Debug)]
 pub struct Gc {
     storages: Vec<LocalStorage>,
 }
 
 impl Gc {
+    #[instrument]
     pub fn new(storages: Vec<LocalStorage>) -> Self {
         Self { storages }
     }
-
+    #[instrument]
     fn list_repo_commits(storage: &LocalStorage) -> GatoResult<Vec<Commit>> {
         let branchs = storage.list_branchs().map_err(|_| Error::GcError)?;
         let mut all_commits = Vec::new();
@@ -31,7 +35,7 @@ impl Gc {
         }
         Ok(all_commits)
     }
-
+    #[instrument]
     fn list_commits_hashs(storage: &LocalStorage) -> GatoResult<Vec<String>> {
         let branchs = storage.list_branchs().map_err(|_| Error::GcError)?;
         let mut all_hashs = Vec::new();
@@ -52,7 +56,7 @@ impl Gc {
         }
         Ok(all_hashs)
     }
-
+    #[instrument]
     pub fn repo_dependices(storage: &LocalStorage) -> GatoResult<Vec<String>> {
         let mut dependices = Self::list_commits_hashs(storage)?;
         let commits = Self::list_repo_commits(storage)?;
@@ -62,7 +66,7 @@ impl Gc {
 
         Ok(dependices)
     }
-
+    #[instrument]
     pub fn global_dependices(&self) -> GatoResult<Vec<String>> {
         let mut linked_files = Vec::new();
         for storage in &self.storages {

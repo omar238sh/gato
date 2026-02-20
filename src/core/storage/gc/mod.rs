@@ -17,7 +17,7 @@ impl Gc {
         Self { storages }
     }
     #[instrument]
-    fn list_repo_commits(storage: &LocalStorage) -> GatoResult<Vec<Commit>> {
+    pub fn list_repo_commits(storage: &LocalStorage) -> GatoResult<Vec<Commit>> {
         let branchs = storage.list_branchs().map_err(|_| Error::GcError)?;
         let mut all_commits = Vec::new();
         for branch in branchs {

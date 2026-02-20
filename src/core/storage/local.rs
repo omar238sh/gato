@@ -288,6 +288,17 @@ impl LocalStorage {
         new_commit.save(self)?;
         Ok(())
     }
+
+    pub fn get_last_tree(&self) -> GatoResult<Tree> {
+        let commit = Commit::load_by_index(0, self).ok_or(Error::IoError(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "No commits found",
+        )))?;
+
+        let tree = Tree::load(hex::encode(commit.tree_hash()), self)?;
+
+        Ok(tree)
+    }
 }
 
 impl StorageEngine for LocalStorage {

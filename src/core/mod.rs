@@ -5,3 +5,4 @@ pub mod config;
 pub mod error;
 pub mod init;
 pub mod storage;
+pub mod vfs;

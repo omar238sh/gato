@@ -120,6 +120,43 @@ impl Display for Commit {
 }
 
 impl Commit {
+    pub fn verify(&self, storage: &LocalStorage) -> GatoResult<Vec<String>> {
+        let store_files = storage.list_files()?;
+
+        let commit_deps = self.dependices();
+        let mut needed_files = Vec::new();
+        for dep in commit_deps {
+            if !store_files.contains(&dep) {
+                needed_files.push(dep);
+            }
+        }
+        let tree_hash = hex::encode(self.tree_hash());
+        if !store_files.contains(&tree_hash) {
+            needed_files.push(tree_hash);
+        }
+
+        Ok(needed_files)
+    }
+
+    pub fn verify_commit(&self, storage: &LocalStorage) -> GatoResult<bool> {
+        Ok(self.verify(storage)?.is_empty())
+    }
+
+    pub fn message(&self) -> &String {
+        match self {
+            Commit::V1 { message, .. } => message,
+            Commit::MergedCommitV1 { message, .. } => message,
+        }
+    }
+
+    pub fn hash(&self) -> GatoResult<String> {
+        let data = encode_to_vec(self, config::standard())?;
+
+        let hash = hash(&data);
+        let hash_hex = hash.to_hex().to_string();
+        Ok(hash_hex)
+    }
+
     #[instrument]
     pub fn save(&self, storage: &LocalStorage) -> Result<(), CommitError> {
         let data = encode_to_vec(self, config::standard())?;
@@ -290,7 +327,7 @@ impl Commit {
 }
 
 #[derive(Encode, Decode, Debug, Clone, PartialEq)]
-enum TreeEntry {
+pub enum TreeEntry {
     Blob(String, Vec<u8>), // hash of the blob
     Tree(String, Vec<u8>), // hash of the tree
 }
@@ -333,12 +370,26 @@ impl TreeEntry {
             TreeEntry::Tree(_, items) => items.clone(),
         }
     }
+
+    pub fn change_name(&mut self, new_name: String) {
+        match self {
+            TreeEntry::Blob(name, _) => *name = new_name,
+            TreeEntry::Tree(name, _) => *name = new_name,
+        }
+    }
+
+    pub fn change_hash(&mut self, new_hash: Vec<u8>) {
+        match self {
+            TreeEntry::Blob(_, items) => *items = new_hash,
+            TreeEntry::Tree(_, items) => *items = new_hash,
+        }
+    }
 }
 
 #[derive(Encode, Decode, Debug, Clone)]
 pub struct Tree {
-    name: String,
-    entries: Vec<TreeEntry>, // name , entry
+    pub name: String,
+    pub entries: Vec<TreeEntry>, // name , entry
 }
 
 // README.md
@@ -360,8 +411,9 @@ impl Tree {
     fn add_entry(&mut self, entry: TreeEntry) {
         self.entries.push(entry);
     }
+
     #[instrument]
-    fn into_entry(&self) -> TreeEntry {
+    pub fn into_entry(&self) -> TreeEntry {
         TreeEntry::Tree(self.name.clone(), self.hash())
     }
     #[instrument]
@@ -398,7 +450,7 @@ impl Tree {
     }
     #[instrument]
     // save the tree object to .gato/objects/<first 2 chars>/<rest chars>
-    fn save(&self, storage: &LocalStorage) -> String {
+    pub fn save(&self, storage: &LocalStorage) -> String {
         let tree_hash = self.hash_str();
         let tree_data = self.tree_bytes();
         match storage.put(&tree_hash, tree_data) {
@@ -409,6 +461,16 @@ impl Tree {
         };
         tree_hash
     }
+
+    pub fn replace(&mut self, entry: &TreeEntry) {
+        for i in &mut self.entries {
+            if i.name() == entry.name() {
+                i.change_hash(entry.hash());
+                break;
+            }
+        }
+    }
+
     #[instrument]
     // load tree object from .gato/objects/<first 2 chars>/<rest chars>
     pub fn load(hash: String, storage: &LocalStorage) -> GatoResult<Self> {

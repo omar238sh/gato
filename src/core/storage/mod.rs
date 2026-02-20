@@ -1,5 +1,5 @@
 use thiserror::Error;
-mod gc;
+pub mod gc;
 pub mod local;
 mod status;
 pub trait StorageEngine: Send + Sync {

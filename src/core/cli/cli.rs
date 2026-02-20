@@ -85,4 +85,24 @@ pub enum Commands {
         target_branch: String,
         message: String,
     },
+    #[clap(
+        name = "verify-commit",
+        about = "Verify the integrity of a specific commit",
+        alias = "vc"
+    )]
+    VerifyCommit { commit_hash: String },
+
+    #[clap(
+        name = "list-commits",
+        about = "List all commits in the repository",
+        alias = "lc"
+    )]
+    ListCommits,
+
+    #[clap(
+        name = "mount",
+        about = "Mount the repository as a virtual filesystem",
+        alias = "mo"
+    )]
+    Mount { mount_point: String },
 }

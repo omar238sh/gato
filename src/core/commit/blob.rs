@@ -4,8 +4,10 @@ use bincode::{Decode, Encode, encode_to_vec};
 use tracing::instrument;
 
 use crate::core::{
-    add::chunker::IndexData, commit::error::CommitError, error::GatoResult,
-    storage::local::LocalStorage,
+    add::chunker::IndexData,
+    commit::error::CommitError,
+    error::GatoResult,
+    storage::{StorageEngine, local::LocalStorage},
 };
 
 #[derive(Debug, Decode, Encode)]
@@ -15,6 +17,13 @@ pub enum Blob {
 }
 
 impl Blob {
+    pub fn new(hash: String, storage: &LocalStorage) -> GatoResult<Self> {
+        let data = storage.get(&hash)?;
+        let (decoded, _): (Self, usize) =
+            bincode::decode_from_slice(&data, bincode::config::standard())?;
+        Ok(decoded)
+    }
+
     #[instrument]
     pub fn restore(self, path: PathBuf, storage: &LocalStorage) -> Result<(), CommitError> {
         match self {

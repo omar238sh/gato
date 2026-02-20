@@ -9,8 +9,9 @@ use crate::core::{
         cli::{Cli, Commands},
         init,
     },
+    commit::Commit,
     error::GatoResult,
-    storage::{StorageEngine, local::LocalStorage},
+    storage::{StorageEngine, gc::Gc, local::LocalStorage},
 };
 
 static GLOBAL_STORE_PATH: OnceLock<PathBuf> = OnceLock::new();
@@ -84,6 +85,33 @@ fn run() -> GatoResult<()> {
         } => {
             let storage = LocalStorage::load_from(get_store_path().clone(), cli.path.clone())?;
             storage.merge(target_branch, message)?;
+        }
+        Commands::VerifyCommit { commit_hash } => {
+            let storage = LocalStorage::load_from(get_store_path().clone(), cli.path.clone())?;
+            let commit = Commit::load(commit_hash, &storage);
+            let result = commit.verify_commit(&storage)?;
+            if result {
+                println!("{}", "the integrity of the commit is OK!".green());
+            } else {
+                println!("{}", "some files deleted".red());
+            }
+        }
+        Commands::ListCommits => {
+            let storage = LocalStorage::load_from(get_store_path().clone(), cli.path.clone())?;
+            let commits = Gc::list_repo_commits(&storage)?;
+            for commit in commits {
+                println!(
+                    "message : {} \nhash : {}\n\n",
+                    commit.message().green(),
+                    commit.hash()?.bright_yellow()
+                );
+            }
+        }
+        Commands::Mount { mount_point } => {
+            let storage = LocalStorage::load_from(get_store_path().clone(), cli.path.clone())?;
+            let root_tree = storage.get_last_tree()?;
+            let fs = core::vfs::GatoFS::new(root_tree, storage);
+            fuser::mount2(fs, mount_point, &[])?;
         }
     };
     Ok(())

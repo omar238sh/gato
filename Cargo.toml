@@ -1,6 +1,6 @@
 [package]
 name = "gato"
-version = "0.6.0"
+version = "0.6.1"
 edition = "2024"
 license = "AGPL-3.0-only"
 authors = ["Omar <omar238sh@gmail.com>"]
@@ -28,3 +28,5 @@ colored = "3.1.1"
 diffy = "0.4.2"
 tracing = {version = "0.1.44" , features = ["max_level_debug", "release_max_level_info"]}
 tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
+fuser = "0.16.0"
+libc = "0.2.182"

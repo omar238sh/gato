@@ -7,8 +7,8 @@
 
 **Gato** is a modern, blazing-fast version control system built from scratch in **Rust**. It is engineered for developers who deal with massive datasets and demand a VCS that leverages multi-core architectures to provide near-instantaneous performance. Gato uses content-defined chunking, parallelized hashing and compression, and a content-addressable object store — all concepts inspired by Git but reimagined with performance-first design.
 
+![gato_logo](assets/gato_logo.png)
 ---
-
 ## Table of Contents
 
 - [Key Features](#-key-features)

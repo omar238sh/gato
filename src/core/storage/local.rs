@@ -156,9 +156,9 @@ impl LocalStorage {
         let branchs = fs::read_dir(&path)?;
 
         for branch in branchs {
-            if let Ok(name) = branch?.file_name().into_string() {
-                branchs_names.push(name);
-            }
+            let entry = branch?;
+            let name = entry.file_name();
+            branchs_names.push(name.to_string_lossy().into_owned());
         }
 
         Ok(branchs_names)
@@ -253,10 +253,10 @@ impl LocalStorage {
         Ok(())
     }
     #[instrument]
-    pub fn get_as_string(&self, hash: &String) -> GatoResult<String> {
+    pub fn get_as_string(&self, hash: &String, storage: &LocalStorage) -> GatoResult<String> {
         let data = self.get(hash)?;
         let file: Blob = decode_from_slice(&data, config::standard())?.0;
-        Ok(String::from_utf8(file.restore_data()?)?)
+        Ok(String::from_utf8(file.restore_data(storage)?)?)
     }
     #[instrument]
     pub fn merge(&self, target_branch: String, message: String) -> GatoResult<()> {

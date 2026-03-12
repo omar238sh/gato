@@ -18,7 +18,10 @@ pub enum Commands {
         about = "Initialize a new Gato repository in the current directory",
         alias = "i"
     )]
-    Init,
+    Init {
+        #[arg(short, long)]
+        id: Option<String>,
+    },
     #[clap(name = "add", about = "Add file contents to the index", alias = "a")]
     Add { paths: Vec<String> },
     #[clap(

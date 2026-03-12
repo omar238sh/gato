@@ -592,11 +592,13 @@ impl Tree {
                 match (current.get_entry(&name), target.get_entry(&name)) {
                     (Some(TreeEntry::Blob(_, hash1)), Some(TreeEntry::Blob(_, hash2))) => {
                         if let (Ok(current_file), Ok(target_file)) = (
-                            storage.get_as_string(&hex::encode(hash1)),
-                            storage.get_as_string(&hex::encode(hash2)),
+                            storage.get_as_string(&hex::encode(hash1), storage),
+                            storage.get_as_string(&hex::encode(hash2), storage),
                         ) {
                             let base_content = if let Some(base_hash) = b {
-                                storage.get_as_string(&base_hash).unwrap_or(String::new())
+                                storage
+                                    .get_as_string(&base_hash, storage)
+                                    .unwrap_or(String::new())
                             } else {
                                 String::new()
                             };

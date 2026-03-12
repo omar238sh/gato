@@ -18,11 +18,16 @@ impl Gc {
     }
     #[instrument]
     pub fn list_repo_commits(storage: &LocalStorage) -> GatoResult<Vec<Commit>> {
-        let branchs = storage.list_branchs().map_err(|_| Error::GcError)?;
+        let branchs = storage
+            .list_branchs()
+            .map_err(|_| Error::GcError(format!("cannot list branchs!")))?;
         let mut all_commits = Vec::new();
         for branch in branchs {
-            let last_commit_hash =
-                hex::encode(storage.read_ref_vec(branch).map_err(|_| Error::GcError)?);
+            let last_commit_hash = hex::encode(
+                storage
+                    .read_ref_vec(branch)
+                    .map_err(|_| Error::GcError(format!("cannot encode repos")))?,
+            );
             let mut last_commit = Commit::load(last_commit_hash, &storage);
             let mut commits = vec![last_commit.clone()];
 
@@ -37,7 +42,9 @@ impl Gc {
     }
     #[instrument]
     fn list_commits_hashs(storage: &LocalStorage) -> GatoResult<Vec<String>> {
-        let branchs = storage.list_branchs().map_err(|_| Error::GcError)?;
+        let branchs = storage
+            .list_branchs()
+            .map_err(|_| Error::GcError(format!("cannot list branchs!")))?;
         let mut all_hashs = Vec::new();
         for branch in branchs {
             let last_commit_hash = hex::encode(storage.read_ref_vec(branch)?);

@@ -97,6 +97,23 @@ impl IndexData {
 
         Ok(())
     }
+
+    pub fn restore_data(&self, storage: &LocalStorage) -> GatoResult<Vec<u8>> {
+        // let mut file = std::fs::File::create(target_path)?;
+        let mut data = Vec::new();
+        for chunk_hash in &self.path {
+            let hash_hex = hex::encode(chunk_hash);
+
+            let compressed_data = storage.get(&hash_hex)?;
+
+            let raw_data = crate::core::add::decompress(&compressed_data)
+                .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Decompression failed"))?;
+
+            data.extend_from_slice(&raw_data);
+        }
+
+        Ok(data)
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]

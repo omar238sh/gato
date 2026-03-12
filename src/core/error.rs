@@ -22,8 +22,8 @@ pub enum Error {
     #[error("{0}")]
     EncodeError(#[from] bincode::error::EncodeError),
 
-    #[error("There are staged files that have not been committed yet")]
-    GcError,
+    #[error("Gc error: {0}")]
+    GcError(String),
 
     #[error("Cannot delete the active branch")]
     ActiveBranchDeletionError,

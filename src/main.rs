@@ -7,7 +7,7 @@ mod core;
 use crate::core::{
     cli::{
         cli::{Cli, Commands},
-        init,
+        init, init_from,
     },
     commit::Commit,
     error::GatoResult,
@@ -29,7 +29,13 @@ fn run() -> GatoResult<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Init => init(cli.path),
+        Commands::Init { id } => {
+            if let Some(id) = id {
+                init_from(cli.path, id);
+            } else {
+                init(cli.path)
+            }
+        }
         Commands::Add { paths } => {
             let storage = LocalStorage::load_from(get_store_path().clone(), cli.path.clone())?;
             storage.add_paths(paths)?;

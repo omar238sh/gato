@@ -34,3 +34,19 @@ pub fn init(path: PathBuf) {
         }
     }
 }
+
+pub fn init_from(path: PathBuf, target_id: String) {
+    let id = load_config(&path);
+    match id {
+        Ok(_) => {
+            println!("Repo already initialized");
+        }
+        Err(_) => {
+            let storage = LocalStorage::new(get_store_path().clone(), target_id, path);
+            match create_file_layout(&storage) {
+                Ok(()) => println!("initialized successfuly"),
+                Err(_) => {}
+            }
+        }
+    }
+}

@@ -38,14 +38,15 @@ impl Blob {
         Ok(())
     }
     #[instrument]
-    pub fn restore_data(&self) -> GatoResult<Vec<u8>> {
+    pub fn restore_data(&self, storage: &LocalStorage) -> GatoResult<Vec<u8>> {
         match self {
             Blob::Normal(content) => {
-                return Ok(crate::core::add::decompress(&content).unwrap());
+                return Ok(crate::core::add::decompress(&content)?);
             }
-            Blob::ChunksMap(..) => {}
+            Blob::ChunksMap(index_data) => {
+                return Ok(index_data.restore_data(&storage)?);
+            }
         }
-        Err(crate::core::error::Error::RestoreDataError)
     }
     #[instrument]
     pub fn encode(&self) -> Result<Vec<u8>, CommitError> {

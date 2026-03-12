@@ -69,16 +69,17 @@ impl GatoFS {
         _lock_owner: Option<u64>,
     ) -> VFSResult<Vec<u8>> {
         let node = self.inodes.get_node(ino)?;
-        let read = node.read().map_err(|_| VFSError::LockPoisoned)?;
-        if !read.is_file() {
+
+        let mut write = node.write().map_err(|_| VFSError::LockPoisoned)?;
+        if !write.is_file() {
             return Err(VFSError::NotAFile);
         }
-        let hash = hex::encode(read.entry.hash());
-        let blob =
-            Blob::new(hash, &self.storage).map_err(|e| VFSError::GatoError(e.to_string()))?;
-        let data = blob
-            .restore_data()
-            .map_err(|e| VFSError::GatoError(e.to_string()))?;
+        write.load(&self.storage);
+        let x = write.data.read().map_err(|_| VFSError::LockPoisoned)?;
+        let data = match x.as_ref() {
+            Some(v) => v.as_slice(),
+            None => &[],
+        };
         let len = data.len();
         let start = std::cmp::min(offset as usize, len);
         let end = std::cmp::min(start + size as usize, len);
@@ -160,7 +161,7 @@ impl Filesystem for GatoFS {
         reply.ok();
     }
 
-    fn open(&mut self, _req: &fuser::Request<'_>, ino: u64, flags: i32, reply: fuser::ReplyOpen) {
+    fn open(&mut self, _req: &fuser::Request<'_>, ino: u64, _flags: i32, reply: fuser::ReplyOpen) {
         match self.inodes.get_node(ino) {
             Ok(node) => {
                 let node = node.read().map_err(|_| VFSError::LockPoisoned).unwrap();
@@ -191,6 +192,33 @@ impl Filesystem for GatoFS {
             }
             Err(_) => {
                 reply.error(libc::EIO);
+            }
+        }
+    }
+
+    fn write(
+        &mut self,
+        _req: &fuser::Request<'_>,
+        ino: u64,
+        _fh: u64,
+        offset: i64,
+        data: &[u8],
+        _write_flags: u32,
+        _flags: i32,
+        _lock_owner: Option<u64>,
+        reply: fuser::ReplyWrite,
+    ) {
+        if let Ok(node) = self.inodes.get_node(ino) {
+            if let Ok(mut node) = node.write() {
+                let result = node.write(&self.storage, offset as usize, data, &mut self.inodes);
+                match result {
+                    Ok(()) => {
+                        reply.written(data.len() as u32);
+                    }
+                    Err(_) => {
+                        reply.error(libc::EIO);
+                    }
+                }
             }
         }
     }

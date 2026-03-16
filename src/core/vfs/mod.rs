@@ -1,10 +1,10 @@
-use std::sync::{Arc, RwLock, atomic::AtomicU64};
+use std::sync::atomic::AtomicU64;
 mod error;
 mod models;
 use fuser::{FileType, Filesystem};
 
 use crate::core::{
-    commit::{Tree, blob::Blob},
+    commit::Tree,
     storage::local::LocalStorage,
     vfs::{
         error::{VFSError, VFSResult},
@@ -13,7 +13,7 @@ use crate::core::{
 };
 
 pub struct GatoFS {
-    root_tree: Arc<RwLock<Tree>>,
+    // root_tree: Arc<RwLock<Tree>>,
     inodes: TreeNodes,
     next: AtomicU64,
     loaded: Vec<u64>,
@@ -28,7 +28,7 @@ impl GatoFS {
         let inodes = TreeNodes::new();
         inodes.add_entry(root_node).unwrap();
         Self {
-            root_tree: Arc::new(RwLock::new(root_tree)),
+            // root_tree: Arc::new(RwLock::new(root_tree)),
             inodes: inodes,
             next: AtomicU64::new(2),
             storage: storage,

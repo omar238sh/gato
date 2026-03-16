@@ -21,6 +21,8 @@ pub enum Commands {
     Init {
         #[arg(short, long)]
         id: Option<String>,
+        // #[arg(short, long)]
+        // force: bool,
     },
     #[clap(name = "add", about = "Add file contents to the index", alias = "a")]
     Add { paths: Vec<String> },

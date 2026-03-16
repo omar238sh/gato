@@ -34,8 +34,8 @@ pub enum Error {
     #[error("Merge conflict detected in file: {0}")]
     MergeConflict(String),
 
-    #[error("cannot restore data from blob")]
-    RestoreDataError,
+    // #[error("cannot restore data from blob")]
+    // RestoreDataError,
     #[error("UTF-8 conversion error")]
     FromUTF8Error(#[from] std::string::FromUtf8Error),
 }

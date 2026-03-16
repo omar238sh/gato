@@ -1,4 +1,9 @@
-use std::{collections::HashMap, fs, path::PathBuf, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    fs,
+    path::PathBuf,
+    sync::Arc,
+};
 
 use bincode::{config, decode_from_slice, encode_to_vec};
 use tracing::instrument;
@@ -120,19 +125,19 @@ impl LocalStorage {
     //     init(path)
     // }
     #[instrument]
-    pub fn list_repos(&self) -> GatoResult<Vec<PathBuf>> {
+    pub fn list_repos(&self) -> GatoResult<HashSet<PathBuf>> {
         let repos_path = self.root_path.join("repos");
         let past_data = fs::read(repos_path);
-        let data: Vec<PathBuf> = match past_data {
+        let data: HashSet<PathBuf> = match past_data {
             Ok(v) => bincode::decode_from_slice(v.as_slice(), bincode::config::standard())?.0,
-            Err(_) => Vec::new(),
+            Err(_) => HashSet::new(),
         };
         Ok(data)
     }
     #[instrument]
     pub fn push_to_repos(&self) -> GatoResult<()> {
         let mut data = self.list_repos()?;
-        data.push(self.work_dir().canonicalize()?.to_owned());
+        data.insert(self.work_dir().canonicalize()?.to_owned());
         fs::write(
             self.root_path.join("repos"),
             encode_to_vec(data, bincode::config::standard())?,

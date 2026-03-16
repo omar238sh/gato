@@ -7,7 +7,7 @@ author = "Gato"
 
 description = "Gato Repo description"
 
-ignore = ["target" , ".git"]
+ignore = ["target"]
 
 [compression]
 

@@ -1,5 +1,3 @@
-use crate::core::vfs::error;
-
 #[derive(thiserror::Error, Debug)]
 pub enum VFSError {
     #[error("Internal synchronization error: Lock is poisoned")]

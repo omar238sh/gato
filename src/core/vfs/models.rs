@@ -1,16 +1,14 @@
 use std::{
-    hash,
-    sync::{Arc, Mutex, RwLock},
+    sync::{Arc, RwLock},
     time::SystemTime,
 };
 
-use chrono::Offset;
 use fuser::{FileAttr, FileType};
 
 use crate::core::{
     add::add_file_dry,
     commit::{Tree, TreeEntry, blob::Blob},
-    storage::{self, local::LocalStorage},
+    storage::local::LocalStorage,
     vfs::error::{VFSError, VFSResult},
 };
 
@@ -216,18 +214,18 @@ impl TreeNodes {
         Ok(())
     }
 
-    pub fn find_with_name(&self, parent: u64, name: &String) -> VFSResult<Arc<RwLock<TreeNode>>> {
-        let read = self.data.read().map_err(|_| VFSError::LockPoisoned)?;
+    // pub fn find_with_name(&self, parent: u64, name: &String) -> VFSResult<Arc<RwLock<TreeNode>>> {
+    //     let read = self.data.read().map_err(|_| VFSError::LockPoisoned)?;
 
-        for i in read.iter() {
-            let node_read = i.read().map_err(|_| VFSError::LockPoisoned)?;
-            if node_read.entry.name() == name && node_read.parent == parent {
-                return Ok(i.clone());
-            }
-        }
+    //     for i in read.iter() {
+    //         let node_read = i.read().map_err(|_| VFSError::LockPoisoned)?;
+    //         if node_read.entry.name() == name && node_read.parent == parent {
+    //             return Ok(i.clone());
+    //         }
+    //     }
 
-        Err(VFSError::NodeNotLoaded)
-    }
+    //     Err(VFSError::NodeNotLoaded)
+    // }
 
     pub fn get_file_attr_with_name(
         &self,
@@ -258,17 +256,17 @@ impl TreeNodes {
         Err(VFSError::NodeNotLoaded)
     }
 
-    pub fn get_all_parents(&self, inodes: Vec<u64>) -> VFSResult<Vec<u64>> {
-        let mut parents = Vec::new();
-        let nodes_read = self.data.read().map_err(|_| VFSError::LockPoisoned)?;
-        for e in nodes_read.iter() {
-            let node_read = e.read().map_err(|_| VFSError::LockPoisoned)?;
-            if inodes.contains(&node_read.inode) {
-                parents.push(node_read.parent);
-            }
-        }
-        Ok(parents)
-    }
+    // pub fn get_all_parents(&self, inodes: Vec<u64>) -> VFSResult<Vec<u64>> {
+    //     let mut parents = Vec::new();
+    //     let nodes_read = self.data.read().map_err(|_| VFSError::LockPoisoned)?;
+    //     for e in nodes_read.iter() {
+    //         let node_read = e.read().map_err(|_| VFSError::LockPoisoned)?;
+    //         if inodes.contains(&node_read.inode) {
+    //             parents.push(node_read.parent);
+    //         }
+    //     }
+    //     Ok(parents)
+    // }
 
     pub fn get_node_attr(&self, inode: u64, storage: &LocalStorage) -> VFSResult<FileAttr> {
         let nodes_read = self.data.read().map_err(|_| VFSError::LockPoisoned)?;
@@ -301,17 +299,17 @@ impl TreeNodes {
         Ok(())
     }
 
-    pub fn get_by_parent(&self, parent: u64) -> VFSResult<Vec<Arc<RwLock<TreeNode>>>> {
-        let read = self.data.read().map_err(|_| VFSError::LockPoisoned)?;
-        let mut result = Vec::new();
-        for i in read.iter() {
-            let node_read = i.read().map_err(|_| VFSError::LockPoisoned)?;
-            if node_read.parent == parent {
-                result.push(i.clone());
-            }
-        }
-        Ok(result)
-    }
+    // pub fn get_by_parent(&self, parent: u64) -> VFSResult<Vec<Arc<RwLock<TreeNode>>>> {
+    //     let read = self.data.read().map_err(|_| VFSError::LockPoisoned)?;
+    //     let mut result = Vec::new();
+    //     for i in read.iter() {
+    //         let node_read = i.read().map_err(|_| VFSError::LockPoisoned)?;
+    //         if node_read.parent == parent {
+    //             result.push(i.clone());
+    //         }
+    //     }
+    //     Ok(result)
+    // }
 
     pub fn get_by_parent_fuser(&self, parent: u64) -> VFSResult<Vec<(u64, FileType, String)>> {
         let read = self.data.read().map_err(|_| VFSError::LockPoisoned)?;

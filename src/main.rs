@@ -113,6 +113,7 @@ fn run() -> GatoResult<()> {
                 );
             }
         }
+        #[cfg(unix)]
         Commands::Mount { mount_point } => {
             let storage = LocalStorage::load_from(get_store_path().clone(), cli.path.clone())?;
             let root_tree = storage.get_last_tree()?;

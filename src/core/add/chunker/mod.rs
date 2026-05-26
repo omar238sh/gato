@@ -1,13 +1,14 @@
 use std::{
     collections::BTreeMap,
     io::{self, Write},
-    os::unix::fs::MetadataExt,
     path::{Path, PathBuf},
 };
 
 use bincode::{Decode, Encode};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use serde::{Deserialize, Serialize};
+#[cfg(unix)]
+use std::os::unix::fs::MetadataExt;
 
 use crate::core::{
     add::{FileContent, compress, compute_hash, get_file_metadata, index::IndexEntry, smart_read},
@@ -162,11 +163,20 @@ pub fn add_as_chunk(
 
     storage.put(&hash_str, file_data)?;
     hashs.push(hash_str);
+    #[cfg(unix)]
     let metadata = get_file_metadata(path)?;
     let index = IndexEntry {
         hash: file_hash,
         size: buffer.len() as u64,
+        #[cfg(not(unix))]
+        mtime: 0,
+
+        #[cfg(not(unix))]
+        mode: 0,
+        #[cfg(unix)]
         mtime: metadata.mtime() as u32,
+
+        #[cfg(unix)]
         mode: metadata.mode(),
     };
     Ok((path.to_owned(), index, hashs))

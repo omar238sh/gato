@@ -6,6 +6,7 @@ use std::io::Write;
 use std::io::{self, Read};
 
 use std::ops::Deref;
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

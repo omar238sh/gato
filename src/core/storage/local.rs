@@ -144,6 +144,17 @@ impl LocalStorage {
         )?;
         Ok(())
     }
+
+    pub fn pop_from_repos(&self) -> GatoResult<()> {
+        let mut data = self.list_repos()?;
+        data.remove(&self.work_dir().canonicalize()?);
+        fs::write(
+            self.root_path.join("repos"),
+            encode_to_vec(data, bincode::config::standard())?,
+        )?;
+        Ok(())
+    }
+
     #[instrument]
     fn remove(&self, hash: &String) -> GatoResult<()> {
         let object_path = self.objects_path(hash);
@@ -158,6 +169,7 @@ impl LocalStorage {
             .join("refs")
             .join("heads");
         let mut branchs_names = Vec::new();
+
         let branchs = fs::read_dir(&path)?;
 
         for branch in branchs {
@@ -217,6 +229,7 @@ impl LocalStorage {
     pub fn delete_repo(&self) -> GatoResult<()> {
         fs::remove_file(self.work_dir().join("gato.toml"))?;
         fs::remove_dir_all(self.repo_path())?;
+        self.pop_from_repos()?;
         Ok(())
     }
     #[instrument]

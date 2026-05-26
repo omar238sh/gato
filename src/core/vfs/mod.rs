@@ -86,6 +86,10 @@ impl GatoFS {
 
         return Ok(data[start..end].to_vec());
     }
+    pub fn forget_a(&self, inode: u64) -> VFSResult<()> {
+        self.inodes.delete(inode)?;
+        Ok(())
+    }
 }
 
 impl Filesystem for GatoFS {
@@ -97,6 +101,7 @@ impl Filesystem for GatoFS {
         name: &std::ffi::OsStr,
         reply: fuser::ReplyEntry,
     ) {
+        self.load(parent).unwrap();
         match self.inodes.get_file_attr_with_name(
             parent,
             &name.to_os_string().into_string().unwrap_or(String::new()),
@@ -221,5 +226,8 @@ impl Filesystem for GatoFS {
                 }
             }
         }
+    }
+    fn forget(&mut self, _req: &fuser::Request<'_>, ino: u64, _nlookup: u64) {
+        let _ = self.forget_a(ino);
     }
 }

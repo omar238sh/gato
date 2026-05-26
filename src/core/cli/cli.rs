@@ -109,5 +109,6 @@ pub enum Commands {
         about = "Mount the repository as a virtual filesystem",
         alias = "mo"
     )]
+    #[cfg(unix)]
     Mount { mount_point: String },
 }

@@ -90,7 +90,7 @@ impl TreeNode {
             }
             drop(write);
             let mut parents = self.get_parents(nodes)?;
-            dbg!(&parents);
+
             self.update(nodes, self.entry.clone(), storage, &mut parents)?;
             self.len = end as u64;
         }
@@ -158,10 +158,7 @@ impl TreeNode {
     fn get_size(&mut self, storage: &LocalStorage) -> u64 {
         self.load(storage);
         match &self.entry {
-            TreeEntry::Blob(_, _) => {
-                dbg!(self.len);
-                self.len
-            }
+            TreeEntry::Blob(_, _) => self.len,
             TreeEntry::Tree(_, _) => 4096,
         }
     }
@@ -226,6 +223,19 @@ impl TreeNodes {
 
     //     Err(VFSError::NodeNotLoaded)
     // }
+
+    pub fn delete(&self, inode: u64) -> VFSResult<()> {
+        let mut write = self.data.write().map_err(|_| VFSError::LockPoisoned)?;
+        write.retain_mut(|x| {
+            let e = x.write().map_err(|_| VFSError::LockPoisoned);
+            match e {
+                Ok(v) => v.inode != inode || v.inode == 1,
+                Err(_) => false,
+            }
+        });
+
+        Ok(())
+    }
 
     pub fn get_file_attr_with_name(
         &self,

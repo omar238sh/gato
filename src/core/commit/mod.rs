@@ -209,7 +209,7 @@ impl Commit {
     #[instrument]
     pub fn new(message: String, storage: &LocalStorage) -> GatoResult<Self> {
         let (tree_hash, dependencies) = Tree::create_from_index(
-            Index::load(&storage).expect("Failed to load index"),
+            Index::load(&storage).map_err(|_| Error::NoFilesAddedError)?,
             storage,
         );
         let author = load_config(storage.work_dir())?.author;
@@ -613,7 +613,7 @@ impl Tree {
                                     result_tree.add_entry(entry);
                                 }
                                 Err(conflict_content) => {
-                                    println!("⚠️  CONFLICT detected in file: {}", name);
+                                    println!("CONFLICT detected in file: {}", name);
                                     let hash = add_file_dry(conflict_content.as_bytes(), &storage)?;
                                     let entry = TreeEntry::Blob(name.clone(), hash);
                                     deps.push(hex::encode(entry.hash()));

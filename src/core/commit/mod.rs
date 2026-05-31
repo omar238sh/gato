@@ -551,12 +551,6 @@ impl Tree {
         deps: &mut Vec<String>,
         storage: &LocalStorage,
     ) -> GatoResult<Tree> {
-        // println!("{base:?}");
-
-        // println!("{current:?}");
-
-        // println!("{target:?}");
-
         let mut result_tree = Tree::new(current.name.clone());
         let mut all_filenames = std::collections::HashSet::new();
         for e in &current.entries {
